@@ -21,6 +21,9 @@ from app.db import (
     Mastery,
     Student,
     KnowledgePoint,
+    Question as QuestionRow,
+    AnswerRecord,
+    TeacherDecision,
 )
 
 
@@ -53,13 +56,52 @@ def apply_to_db(student_id: str, proposal: dict) -> None:
         s.commit()
 
 
+def record_answer(student_id: str, question: dict, result: dict, session_id: str | None) -> None:
+    """做题事实落库：无论画像建议是否被接受，作答记录都保留（事实与判断分离）"""
+    steps = result.get("steps") or []
+    with SessionLocal() as s:
+        s.add(AnswerRecord(
+            student_id=int(student_id),
+            question_id=int(question["id"]),
+            answer=steps[-1]["result"] if steps else "",
+            is_correct=result["is_correct"],
+            error_type=result["error"]["error_type"],
+            session_id=session_id,
+        ))
+        s.commit()
+
+
+def record_teacher_decision(student_id: str, proposal: dict, decision: str,
+                            session_id: str | None, question_id: str | None) -> None:
+    """老师仲裁留痕：AI 建议原文 + 老师决定，事后可追溯（reject 也记）"""
+    with SessionLocal() as s:
+        s.add(TeacherDecision(
+            student_id=int(student_id),
+            kp_id=int(proposal["kp_id"]),
+            session_id=session_id,
+            question_id=int(question_id) if question_id else None,
+            decision=decision,
+            proposal=dict(proposal),
+        ))
+        s.commit()
+
+
 def profile_update_node(state: TutorState) -> dict:
     """画像更新节点：先算（纯）→ 再停（interrupt）→ 后写（带分流）"""
+    # 0. 入口校验：缺 question 就该在打扰老师之前报错，而不是拍板后落库时崩
+    question = state.get("question") or {}
+    if not question.get("id"):
+        raise ValueError("profile_update 需要 state['question'] 且携带 id（answer_records 外键）")
     # 1. 纯计算：resume 重跑时这里会再执行一遍，但无副作用
     proposal = propose_profile_change(state["result"])
     # 2. 暂停等老师：第一次执行停在这；resume 时此行直接返回老师的选择
     decision = interrupt({"proposal": proposal, "question": "请审批画像更新：accept / reject"})
-    # 3. 副作用：只在 interrupt 之后，且老师 accept 才写库
+    # 3. 副作用：只在 interrupt 之后。事实与仲裁留痕必写，mastery 只在 accept 时写
+    record_answer(state["student_id"], question, state["result"], state.get("session_id"))
+    record_teacher_decision(
+        state["student_id"], proposal, decision,
+        state.get("session_id"), question.get("id"),
+    )
     if decision == "accept":
         apply_to_db(state["student_id"], proposal)
         return {"batch_profile": proposal, "teacher_decision": "accept", "phase": "profile"}
@@ -106,12 +148,18 @@ if __name__ == "__main__":
         pass
 
     student_id, kp_id = _seed()
+    with SessionLocal() as s:
+        qrow = QuestionRow(kp_id=kp_id, stem="演示题：x² - 5x + 6 = 0", answer="x₁=3.0, x₂=2.0", source="AI")
+        s.add(qrow)
+        s.commit()
+        question_id = qrow.id
+
     graph = build_profile_graph()
     config = {"configurable": {"thread_id": "p1-l5-demo"}}
 
     # 模拟 L4 批改 Agent 的产出（离线，不调 LLM）：学生答错，AI 归因"计算"
     grade_result = {
-        "question_id": "q-1001",
+        "question_id": str(question_id),
         "is_correct": False,
         "error": {
             "error_type": "计算",
@@ -129,7 +177,13 @@ if __name__ == "__main__":
 
     print("=== 第1步：invoke，走到画像更新节点会暂停等老师 ===")
     graph.invoke(
-        {"student_id": str(student_id), "result": grade_result, "phase": "grade"},
+        {
+            "student_id": str(student_id),
+            "question": {"id": str(question_id), "kp_id": str(kp_id)},
+            "result": grade_result,
+            "session_id": "p1-l5-demo",
+            "phase": "grade",
+        },
         config,
     )
     snapshot = graph.get_state(config)

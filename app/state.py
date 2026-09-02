@@ -67,6 +67,7 @@ class RecheckResult(TypedDict):
 
 class TutorState(TypedDict):
     student_id: str
+    session_id: Optional[str]
     kp_id: str
     kp_name: Optional[str]
     profile_snapshot: Mastery

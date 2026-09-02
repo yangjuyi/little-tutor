@@ -9,7 +9,7 @@ from unittest.mock import patch
 from langgraph.types import Command
 
 from app.graph import route_by_phase, build_tutor_graph
-from app.profile_update import propose_profile_change
+from app.profile_update import build_profile_graph, propose_profile_change
 
 
 FAKE_GRADE_WRONG = {
@@ -63,7 +63,7 @@ class TestRouteByPhase(unittest.TestCase):
 
 
 class TestProfileUpdateGraph(unittest.TestCase):
-    """HITL 端到端：暂停 → 审批 → 按决定分流（不写真库，mock apply_to_db）"""
+    """HITL 端到端：暂停 → 审批 → 按决定分流（不写真库，mock 全部落库函数）"""
 
     def _invoke_grade(self, graph, config):
         # mock 掉 L4 批改的 LLM 调用，从 grade 入口走完整链路（离线）
@@ -79,7 +79,9 @@ class TestProfileUpdateGraph(unittest.TestCase):
             )
 
     def test_accept_persists_once(self):
-        with patch("app.profile_update.apply_to_db") as mock_db:
+        with patch("app.profile_update.apply_to_db") as mock_db, \
+             patch("app.profile_update.record_answer"), \
+             patch("app.profile_update.record_teacher_decision"):
             graph = build_tutor_graph()
             config = {"configurable": {"thread_id": "ut-accept"}}
             self._invoke_grade(graph, config)
@@ -89,12 +91,16 @@ class TestProfileUpdateGraph(unittest.TestCase):
             self.assertEqual(final["teacher_decision"], "accept")
 
     def test_reject_never_persists(self):
-        with patch("app.profile_update.apply_to_db") as mock_db:
+        with patch("app.profile_update.apply_to_db") as mock_db, \
+             patch("app.profile_update.record_answer") as mock_record, \
+             patch("app.profile_update.record_teacher_decision") as mock_decision:
             graph = build_tutor_graph()
             config = {"configurable": {"thread_id": "ut-reject"}}
             self._invoke_grade(graph, config)
             final = graph.invoke(Command(resume="reject"), config)
-            mock_db.assert_not_called()  # 老师否决 → 一个字节都不写
+            mock_db.assert_not_called()      # 老师否决 → mastery 不写
+            mock_record.assert_called_once() # 但做题事实要留痕
+            mock_decision.assert_called_once()  # 仲裁决定也留痕（reject 可追溯）
             self.assertEqual(final["teacher_decision"], "reject")
 
     def test_pause_payload_contains_proposal(self):
@@ -106,6 +112,22 @@ class TestProfileUpdateGraph(unittest.TestCase):
         self.assertIn("proposal", payload)
         self.assertEqual(payload["proposal"]["kp_id"], "39")
         self.assertEqual(snap.next, ("profile_update",))
+
+    def test_missing_question_fails_before_interrupt(self):
+        """缺 question 必须在打扰老师之前报错，而不是拍板后落库时崩"""
+        graph = build_profile_graph()
+        config = {"configurable": {"thread_id": "ut-no-question"}}
+        with self.assertRaises(ValueError), \
+             patch("app.profile_update.record_answer"), \
+             patch("app.profile_update.record_teacher_decision"), \
+             patch("app.profile_update.apply_to_db"):
+            graph.invoke(
+                {
+                    "student_id": "999",
+                    "result": dict(FAKE_GRADE_WRONG),
+                },
+                config,
+            )
 
 
 if __name__ == "__main__":

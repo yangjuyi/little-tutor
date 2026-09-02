@@ -2,9 +2,10 @@
 app/db.py — SQLite 连接与建表（SQLAlchemy 2.x）
 =================================================
 
-数据层设计见 PROJECT_SPEC.md 第 6 章：
-- 6 张表：students / knowledge_points / questions / mastery / answer_records / profiles
-- 掌握度 6 级（MasteryLevel），学生画像存 JSON
+数据层设计见 PROJECT_SPEC.md 第 6 章 + §16：
+- 7 张表：students / knowledge_points / questions / mastery / answer_records /
+  profiles / teacher_decisions
+- 掌握度 3 级（MasteryLevel，与难度混合矩阵同一套词汇），学生画像存 JSON
 - SQLAlchemy ORM 抽象，未来可平滑切换 Postgres
 
 用法：
@@ -58,14 +59,11 @@ class Base(DeclarativeBase):
 
 
 class MasteryLevel(str, Enum):
-    """知识点掌握度 6 级（见规格 6.3）"""
+    """知识点掌握度 3 级（spec §16；与 DIFFICULTY_RATIOS 词汇一致）"""
 
-    NOT_STARTED = "not_started"   # 未接触
-    UNFAMILIAR = "unfamiliar"     # 陌生
     WEAK = "weak"                 # 薄弱
-    DEVELOPING = "developing"     # 发展中
-    PROFICIENT = "proficient"     # 较熟练
-    MASTERED = "mastered"         # 精通
+    MID = "mid"                   # 中等
+    STRONG = "strong"             # 扎实
 
 
 # ============================================================
@@ -146,7 +144,7 @@ class Mastery(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), index=True)
     kp_id: Mapped[int] = mapped_column(ForeignKey("knowledge_points.id"), index=True)
-    level: Mapped[str] = mapped_column(String(20), default=MasteryLevel.NOT_STARTED.value)
+    level: Mapped[str] = mapped_column(String(20), default=MasteryLevel.WEAK.value)
     confidence: Mapped[float] = mapped_column(default=0.0)              # 0~1 置信度
     wrong_count: Mapped[int] = mapped_column(default=0)
     last_status: Mapped[str | None] = mapped_column(Text, nullable=True)  # 最近一次作答情况
@@ -173,9 +171,31 @@ class AnswerRecord(Base):
     is_correct: Mapped[bool] = mapped_column(default=False)
     used_seconds: Mapped[int] = mapped_column(default=0)
     error_type: Mapped[str | None] = mapped_column(String(30), nullable=True)  # 8 类易错之一
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     student: Mapped[Student] = relationship(back_populates="answers")
+
+
+# ============================================================
+# 老师仲裁记录（HITL 可追溯：AI 建议了什么，老师怎么裁）
+# ============================================================
+class TeacherDecision(Base):
+    """老师对画像更新建议的仲裁记录（spec §16：题级→批级可追溯）"""
+
+    __tablename__ = "teacher_decisions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), index=True)
+    kp_id: Mapped[int | None] = mapped_column(
+        ForeignKey("knowledge_points.id"), nullable=True, index=True
+    )
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    question_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    decision: Mapped[str] = mapped_column(String(10))          # accept / reject / edit
+    proposal: Mapped[dict] = mapped_column(JSON, default=dict)  # AI 当时的建议原文
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
 # ============================================================

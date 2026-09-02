@@ -6,6 +6,7 @@ Core principle (spec §7): LLM fills parameters, program computes answers.
 import random
 import math
 import os
+import re
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
 
@@ -82,6 +83,54 @@ def validate_params(a: float, b: float, c: float) -> Optional[str]:
     return None
 
 
+# ========== 程序判对错（spec §7：不靠子串、不靠 LLM）==========
+
+_NUM_TOKEN = re.compile(r"-?\d+(?:\.\d+)?(?:/-?\d+(?:\.\d+)?)?")
+_VAR_LABEL = re.compile(r"[xX]\s*_?\s*[0-9₁₂]?(?=\s*=)")
+
+
+def extract_numbers(text: str) -> set[float]:
+    """从学生作答文本提取数值集合，支持分数（如 1/2 → 0.5）。
+
+    先剥掉 x1 / x₂ 等变量标签的数字（防止下标被当成根），
+    再提取数值；上标 ² 等非 ASCII 字符不会被误提取。
+    """
+    text = _VAR_LABEL.sub("x", text)
+    values: set[float] = set()
+    for token in _NUM_TOKEN.findall(text):
+        if "/" in token:
+            num, den = token.split("/")
+            if float(den) != 0:
+                values.add(round(float(num) / float(den), 2))
+        else:
+            values.add(round(float(token), 2))
+    return values
+
+
+def check_is_correct(student_final: str, roots: list[float]) -> bool:
+    """数值集合比对：每个根都要在学生答案中找到（容差 0.01）。
+
+    相比旧的子串比对：
+    - 假阳性：只答部分根（如两根只答一个）会判错
+    - 假阴性：x1/x₁、3/3.0、1/2/0.5 等格式差异不再影响判定
+    - 推导过程中出现的额外数字（系数、中间值）不影响判定
+    """
+    if not student_final.strip():
+        return False
+    numbers = extract_numbers(student_final)
+    return all(
+        any(abs(n - root) < 0.01 for n in numbers)
+        for root in set(roots)
+    )
+
+
+def _question_roots(question: dict) -> list[float]:
+    """取题目真值根：优先由 params 重算（单一事实源），旧数据回退答案文本提取。"""
+    params = question.get("params")
+    if params:
+        x1, x2 = compute_answer(params["a"], params["b"], params["c"])
+        return [x1, x2]
+    return sorted(extract_numbers(question["answer"]))
 # ========== LLM 初始化 ==========
 
 def get_llm() -> ChatOpenAI:
@@ -169,9 +218,9 @@ def generate_question(mastery_level: str, kp_name: str, llm: ChatOpenAI) -> dict
 
 def grade_question(question: dict, student_steps: list, llm) -> dict:
     """批改：程序判对错 + AI 复演归因。"""
-    # 程序判对错（空答案直接 False，防止空串 in 任何串 = True 的 bug）
+    # 程序判对错：数值集合比对，不再用子串（空答案直接 False）
     student_final = student_steps[-1]["result"].strip() if student_steps else ""
-    is_correct = bool(student_final) and student_final in question["answer"]
+    is_correct = check_is_correct(student_final, _question_roots(question))
 
     # AI 复演归因
     steps_text = NL.join([

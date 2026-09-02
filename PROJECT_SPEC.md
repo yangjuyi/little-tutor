@@ -838,7 +838,7 @@ Docker 重启时正在执行的 Grader 调用会被中断。FastAPI lifespan han
 
 ---
 
-## 15. 当前进度状态快照（2026-08-29）
+## 15. 当前进度状态快照（2026-09-02 更新）
 
 > 供下次接续使用，避免重复讨论。**已确定的不重问，待定的按优先级推进。**
 
@@ -859,12 +859,25 @@ Docker 重启时正在执行的 Grader 调用会被中断。FastAPI lifespan han
 
 ### 关键区分（易混点）
 - **数据层（⑧，已定）= 持久化 SQL 表**：student/answer_record/mastery/teacher_decision
-- **LangGraph 状态（⑨，待定）= 图运行时内存 State**：一轮图运行的临时流转，与 SQL 表关联但不同层
+- **LangGraph 状态（⑨，已定稿）= 图运行时内存 State**：一轮图运行的临时流转，与 SQL 表关联但不同层
+
+### 实现现状（2026-09-02）
+- v0.1 MVP 已提交：双 Agent（出题/批改）+ HITL 闭环端到端可跑（CLI），P1-L1~L6 完成
+- 41 项离线测试全绿：判分、HITL 分流守护（暂停不写/reject 不写/accept 恰好一次）、落库行为
+- 2026-09-02 修复：判分改数值集合比对（堵子串假阳性/假阴性）、mastery 读回接通自适应出题、
+  审批输入校验（不再默认 accept）、profile_update 入口校验（缺 question 打扰老师前报错）
+
+### 实现与设计的已知差异（如实记账，勿静默抹平）
+- db 实际 7 表：students/knowledge_points/questions/mastery/answer_records/profiles/teacher_decisions；
+  本节设计稿的 user/session_counter 两表未建（单学生 CLI 阶段不需要，多学生服务化时再补）
+- `session_id` V1 直接用 CLI 会话线程字符串；`S{YYYYMMDD}-{seq:03d}` 格式与原子计数器留到多学生会话时实现
+- 出题目前每题实时 AI 生成（种子题库直采未接，V1 单 kp 影响有限）
+- LLM 参数生成两次失败仍裸抛异常（无全局兜底），InMemorySaver 重启即失——均留 P2
 
 ### 下一步建议
-1. 定第 9 层：LangGraph State 字段 + 节点 + 条件边
-2. 定第 10 层：掌握度/吸收率/粗心率的计算规则
-3. 写代码前重读本文档 + `data/` 目录结构落地
+1. P2：SqliteSaver 持久化 checkpoint / Send 并发 / 子图 / LLM 全局异常兜底
+2. 多学生服务化前补 user/session_counter 表 + session_id 原子生成
+3. 手撕代码练习路线（见记忆笔记）：profile_update → graph → agents → state → db/run_mvp
 
 ---
 
@@ -1022,7 +1035,8 @@ class TutorState(TypedDict):
 
 - **画像三层落库**：内容层(掌握度)→`mastery` 表；策略层(吸收率)+心理层(行为信号)→`answer_record` 汇总字段(V1)；错因分布→由 `answer_record` 聚合。
 - **题目/答案/解析**→题库 JSON 文件（见 §10.3），State 里对应 `Question` 类型，`answer` 由程序精确计算。**改题时**：模板未破→程序重算答案；模板被老师改破→AI 重解产出答案+解析+过程，与老师自填答案交叉比对后由老师定夺（见 §16.1 决策 #4）。
-- **SQL 6 表不变**：student / answer_record / mastery / teacher_decision / user / session_counter（见 §10.2）。
+- **SQL 表**（实现现状 2026-09-02）：students / knowledge_points / questions / mastery /
+  answer_records / profiles / teacher_decisions 共 7 表；user / session_counter 未建（见 §15 差异记账）。
 - **`answer_record` 新增 `session_id` 字段（会话边界铁律）**：掌握度/吸收率/粗心率按"次会话"聚合（见 §16.5），一次会话的 10-20 道单题靠它归组；会话开始时生成，每轮单题图 `write_back` 落库时带上。**⚠️ 铁律：会话边界只由 `session_id` 显式标识，绝不按题目数量切分**——`session_id` 格式 `S{YYYYMMDD}-{seq:03d}`（如 `S20260831-001`，日期前缀可读且字典序=时间序，序数每天从 001 起靠 DB 计数器原子自增防撞号，日期+序数做唯一约束）。`n_sessions` 数的是**不同 session_id**（30 道题同属一次只算 1 次），不数题。
 - **`answer_record` 新增 `hint_given` 字段（2026-09-01 补）**：`hint_given=true` 标记该题老师发过提示。计算吸收率时**排除 `hint_given=true` 的题目**（见 §16.5），否则提示本身就拉高了"讲解后"正确率，吸收率被污染。
 

@@ -1,6 +1,9 @@
 """Test grade_question with real LLM call."""
 
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from app.agents import get_llm, generate_question, grade_question
