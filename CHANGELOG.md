@@ -3,6 +3,14 @@
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循语义化版本。
 
+## [Unreleased]
+
+### Changed
+
+- `mastery.wrong_count` 更名为 `confirmed_wrong_count`：原字段名暗示"答错次数"，
+  实际语义是"被老师确认的答错次数"（reject 的画像建议不计入）
+- `questions.source` 词汇统一为 `public/private/ai_generated`（原 `"AI"` 与 SPEC §6.1 不一致）
+
 ## [0.1.1] - 2026-09-02
 
 ### Fixed

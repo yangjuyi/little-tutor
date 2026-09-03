@@ -48,7 +48,7 @@ class TestPersistence(unittest.TestCase):
             )
             s.add(kp)
             s.flush()
-            q = db.Question(kp_id=kp.id, stem="stem", answer="x₁=3.0, x₂=2.0", source="AI")
+            q = db.Question(kp_id=kp.id, stem="stem", answer="x₁=3.0, x₂=2.0", source="ai_generated")
             s.add(q)
             s.commit()
             self.student_id, self.kp_id, self.question_id = stu.id, kp.id, q.id
@@ -108,7 +108,7 @@ class TestPersistence(unittest.TestCase):
                 student_id=self.student_id, kp_id=self.kp_id
             ).one()
             self.assertEqual(m.level, "weak")       # 3 级词汇，合法枚举值
-            self.assertEqual(m.wrong_count, 1)
+            self.assertEqual(m.confirmed_wrong_count, 1)
 
             rec = s.query(db.AnswerRecord).one()
             self.assertEqual(rec.question_id, self.question_id)

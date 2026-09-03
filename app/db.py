@@ -126,8 +126,8 @@ class Question(Base):
     options: Mapped[list | None] = mapped_column(JSON, nullable=True)   # 选项（选择题）
     answer: Mapped[str] = mapped_column(Text)                           # 答案
     analysis: Mapped[str | None] = mapped_column(Text, nullable=True)   # 解析
-    difficulty: Mapped[str] = mapped_column(String(20), default="中等")
-    source: Mapped[str] = mapped_column(String(20), default="AI")       # AI/人工
+    difficulty: Mapped[str] = mapped_column(String(20), default="中等")  # 题目难度 simple/mid/hard（与知识点难度中文词表不同）
+    source: Mapped[str] = mapped_column(String(20), default="ai_generated")  # public/private/ai_generated（SPEC §6.1）
 
     knowledge_point: Mapped[KnowledgePoint] = relationship(back_populates="questions")
 
@@ -145,9 +145,9 @@ class Mastery(Base):
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), index=True)
     kp_id: Mapped[int] = mapped_column(ForeignKey("knowledge_points.id"), index=True)
     level: Mapped[str] = mapped_column(String(20), default=MasteryLevel.WEAK.value)
-    confidence: Mapped[float] = mapped_column(default=0.0)              # 0~1 置信度
-    wrong_count: Mapped[int] = mapped_column(default=0)
-    last_status: Mapped[str | None] = mapped_column(Text, nullable=True)  # 最近一次作答情况
+    confidence: Mapped[float] = mapped_column(default=0.0)              # 0~1 置信度（V1 占位，P2 接入 §16.5 计算规则）
+    confirmed_wrong_count: Mapped[int] = mapped_column(default=0)       # 累计被老师确认的答错次数（reject 的建议不计）
+    last_status: Mapped[str | None] = mapped_column(Text, nullable=True)  # 最近一次批改归因备注（V1 复用作画像 evidence 来源）
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, onupdate=datetime.now
     )

@@ -1,6 +1,6 @@
 """LangGraph State / TypedDict definitions.
 
-Source: PROJECT_SPEC.md §16.3 (P1-L1, 2026-08-31)
+Source: PROJECT_SPEC.md §16.3
 State is runtime-only (destroyed after each graph run).
 Data models (Mastery / Question / etc.) are the persistent layer.
 """
@@ -80,7 +80,7 @@ class TutorState(TypedDict):
     cross_check: Optional[Literal["match", "mismatch"]]
     student_steps: List[StudentStep]
     result: QuestionResult
-    batch_profile: dict
+    batch_profile: dict  # 批级画像建议（SPEC §16.7）；V1 单题阶段即题级建议原样上抛
     teacher_decision: Literal["accept", "reject", "edit"]
     teacher_note: Optional[str]
     phase: Literal["generate", "answer", "grade", "profile"]

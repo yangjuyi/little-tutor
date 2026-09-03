@@ -1,4 +1,4 @@
-"""app/run_mvp.py — P1-L6: MVP 多轮 CLI
+"""app/run_mvp.py — MVP 多轮 CLI
 
 流程：出题 → 学生作答 → 批改 → 老师审批画像 → 下一题（同一 thread_id 续会话）
 运行: python -m app.run_mvp
@@ -69,7 +69,7 @@ def _persist_question(kp_id: str, question: dict) -> None:
             answer=question["answer"],
             analysis=question.get("analysis"),
             difficulty=question.get("difficulty", "中等"),
-            source="AI",
+            source="ai_generated",
         )
         s.add(row)
         s.commit()

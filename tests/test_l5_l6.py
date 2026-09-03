@@ -1,4 +1,4 @@
-"""P1-L5/L6 自动化测试：画像更新 HITL + 串图路由（离线，不调 LLM）
+"""自动化测试：画像更新 HITL + 串图路由（离线，不调 LLM）
 
 Run with: .venv/Scripts/python -m unittest tests.test_l5_l6 -v
 """
@@ -35,7 +35,7 @@ class TestProposeProfileChange(unittest.TestCase):
 
     def test_wrong_answer_proposes_weak(self):
         p = propose_profile_change(FAKE_GRADE_WRONG)
-        self.assertEqual(p["wrong_count_delta"], 1)
+        self.assertEqual(p["confirmed_wrong_count_delta"], 1)
         self.assertEqual(p["suggest_level"], "weak")
         self.assertEqual(p["reason"], "计算")
 
@@ -45,7 +45,7 @@ class TestProposeProfileChange(unittest.TestCase):
         g["is_correct"] = True
         g["error"]["error_type"] = "无错"
         p = propose_profile_change(g)
-        self.assertEqual(p["wrong_count_delta"], 0)
+        self.assertEqual(p["confirmed_wrong_count_delta"], 0)
         self.assertEqual(p["suggest_level"], "mid")
 
 
@@ -66,7 +66,7 @@ class TestProfileUpdateGraph(unittest.TestCase):
     """HITL 端到端：暂停 → 审批 → 按决定分流（不写真库，mock 全部落库函数）"""
 
     def _invoke_grade(self, graph, config):
-        # mock 掉 L4 批改的 LLM 调用，从 grade 入口走完整链路（离线）
+        # mock 掉批改的 LLM 调用，从 grade 入口走完整链路（离线）
         with patch("app.graph.grade_question", return_value=FAKE_GRADE_WRONG):
             graph.invoke(
                 {

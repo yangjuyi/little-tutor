@@ -1,4 +1,4 @@
-"""Agents: QuestionGenerator (P1-L3) + Grader (P1-L4, future).
+"""Agents: QuestionGenerator（出题）+ Grader（批改）.
 
 Core principle (spec §7): LLM fills parameters, program computes answers.
 """
@@ -25,7 +25,7 @@ class QuestionParams(BaseModel):
 
 
 class GradeOutput(BaseModel):
-    """Grader 的输出结构（P1-L4 用，先定义好）"""
+    """Grader 的结构化输出模型"""
     is_correct: bool = Field(description="学生最终答案是否正确")
     error_type: Literal["审题", "概念", "计算", "跳步", "粗心", "无错"] = Field(
         description="错误类型，从这6个选项中选择"
@@ -214,7 +214,7 @@ def generate_question(mastery_level: str, kp_name: str, llm: ChatOpenAI) -> dict
 
 
 
-# ========== 批改 Agent（P1-L4） ==========
+# ========== 批改 Agent ==========
 
 def grade_question(question: dict, student_steps: list, llm) -> dict:
     """批改：程序判对错 + AI 复演归因。"""

@@ -1,11 +1,11 @@
-"""app/graph.py — P1-L6: 串图 MVP（出题 → 批改 → 画像更新）
+"""app/graph.py — 串图 MVP（出题 → 批改 → 画像更新）
 
 结构：
-    START --(phase 路由)--> generate（L3 出题）--> END
-    START --(phase 路由)--> grade（L4 批改）--> profile_update（L5 HITL）--> END
+    START --(phase 路由)--> generate（出题）--> END
+    START --(phase 路由)--> grade（批改）--> profile_update（HITL）--> END
 
 两段式流程靠 checkpointer + thread_id 衔接：
-第一次 invoke 出题（黑板存题），学生作答后第二次 invoke 批改并触发老师审批。
+第一次 invoke 出题（题目存入图状态），学生作答后第二次 invoke 批改并触发老师审批。
 """
 
 from langgraph.graph import StateGraph, START, END
@@ -22,7 +22,7 @@ def route_by_phase(state: TutorState) -> str:
 
 
 def generate_node(state: TutorState) -> dict:
-    """出题节点（L3 产出直接接入）：画像难度 → 出题 → 写回黑板"""
+    """出题节点：画像难度 → 出题 → 写回状态"""
     llm = get_llm()
     level = state["profile_snapshot"]["level"]
     q = generate_question(level, state["kp_name"], llm)
@@ -32,7 +32,7 @@ def generate_node(state: TutorState) -> dict:
 
 
 def grade_node(state: TutorState) -> dict:
-    """批改节点（L4 产出直接接入）：程序判对错 + AI 归因"""
+    """批改节点：程序判对错 + AI 归因"""
     result = grade_question(state["question"], state["student_steps"], get_llm())
     return {"result": result, "phase": "profile"}
 
@@ -46,5 +46,5 @@ def build_tutor_graph():
     graph.add_edge("generate", END)
     graph.add_edge("grade", "profile_update")
     graph.add_edge("profile_update", END)
-    # InMemorySaver：P1 MVP 用；P2-L1 换 SqliteSaver
+    # InMemorySaver：MVP 内存态；持久化 checkpoint 换 SqliteSaver
     return graph.compile(checkpointer=InMemorySaver())
