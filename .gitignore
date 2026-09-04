@@ -19,4 +19,4 @@ chroma_db/
 # 私有资料与本地协作文件
 .agents-migration/
 practice/
-AGENTS.md
+MAINTAINERS.md
