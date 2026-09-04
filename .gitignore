@@ -16,6 +16,7 @@ venv/
 *.sqlite3
 chroma_db/
 
-# 私有资料（简历/记忆/迁移配置），严禁入库
+# 私有资料与本地协作文件
 .agents-migration/
 practice/
+AGENTS.md
