@@ -1,9 +1,10 @@
 """
-build_knowledge_base.py — 知识库生成脚本（第 1 周核心产出）
-=========================================================
+build_knowledge_base.py — 知识库生成脚本
+=========================================
 
-🎯 作用
-- 根据种子清单（初三数学 / 物理 / 化学核心考点），用 LLM 批量生成"知识卡片"
+作用
+- 根据种子清单生成知识卡片；数学卡片用于当前 V1/V2 教学闭环，
+  物理/化学卡片仅作为 V3 学科扩展的数据预留
 - 知识卡片结构见规格 6.2：concept / formula / common_errors / exam_importance 等
 - 优先覆盖：易错点（common_errors）与中考难考点（exam_importance: high）
 - 输出：`data/generated/{学科}_knowledge.json`（供人工审校）+ 写入 SQLite
@@ -15,7 +16,7 @@ build_knowledge_base.py — 知识库生成脚本（第 1 周核心产出）
 4. 生成结果请**人工审校**后再用于教学（AI 可能出错）
 
 ▶️ 运行
-    python data/build_knowledge_base.py                    # 三科全部
+    python data/build_knowledge_base.py                    # 生成种子清单全部卡片（含 V3 预留）
     python data/build_knowledge_base.py --subject 数学       # 只生成数学
     python data/build_knowledge_base.py --dry-run           # 只看清单，不调 API
     python data/build_knowledge_base.py --limit 5           # 只生成前 5 个
@@ -233,7 +234,9 @@ def export_json() -> None:
 # 🚀 主流程
 # ============================================================
 def main() -> None:
-    parser = argparse.ArgumentParser(description="生成初三数理化知识库")
+    parser = argparse.ArgumentParser(
+        description="生成知识库：数学用于 V1/V2，物理/化学为 V3 扩展预留"
+    )
     parser.add_argument("--subject", choices=["数学", "物理", "化学", "all"], default="all")
     parser.add_argument("--limit", type=int, default=0, help="只生成前 N 个知识点（0=不限制）")
     parser.add_argument("--dry-run", action="store_true", help="只列出待生成清单，不调用 API")

@@ -77,7 +77,7 @@ class Student(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(50))
     grade: Mapped[str] = mapped_column(String(20), default="初三")
-    subjects: Mapped[str] = mapped_column(String(100), default="数学,物理,化学")
+    subjects: Mapped[str] = mapped_column(String(100), default="数学")  # V1/V2 当前范围；物理/化学为 V3 扩展预留
     target: Mapped[str | None] = mapped_column(String(200), nullable=True)  # 目标/中考目标
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
@@ -95,7 +95,7 @@ class KnowledgePoint(Base):
     __tablename__ = "knowledge_points"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    subject: Mapped[str] = mapped_column(String(20), index=True)      # 数学/物理/化学
+    subject: Mapped[str] = mapped_column(String(20), index=True)      # V1/V2 当前仅数学；物理/化学为 V3 扩展预留
     grade: Mapped[str] = mapped_column(String(20), default="初三")
     chapter: Mapped[str] = mapped_column(String(100))                 # 章节
     kp_name: Mapped[str] = mapped_column(String(100))                 # 知识点名称
