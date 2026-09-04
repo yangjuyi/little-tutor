@@ -86,13 +86,13 @@ def validate_params(a: float, b: float, c: float) -> Optional[str]:
 # ========== 程序判对错（spec §7：不靠子串、不靠 LLM）==========
 
 _NUM_TOKEN = re.compile(r"-?\d+(?:\.\d+)?(?:/-?\d+(?:\.\d+)?)?")
-_VAR_LABEL = re.compile(r"[xX]\s*_?\s*[0-9₁₂]?(?=\s*=)")
+_VAR_LABEL = re.compile(r"[xX]\s*_?\s*(?:[0-9₁₂])+(?=\s*=)")
 
 
 def extract_numbers(text: str) -> set[float]:
     """从学生作答文本提取数值集合，支持分数（如 1/2 → 0.5）。
 
-    先剥掉 x1 / x₂ 等变量标签的数字（防止下标被当成根），
+    先剥掉 x1 / x₂ / x₁₂ 等变量标签的数字（防止下标被当成根），
     再提取数值；上标 ² 等非 ASCII 字符不会被误提取。
     """
     text = _VAR_LABEL.sub("x", text)

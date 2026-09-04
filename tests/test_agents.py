@@ -116,6 +116,10 @@ class TestExtractNumbers(unittest.TestCase):
         self.assertEqual(extract_numbers("x1=3, x2=2"), {3.0, 2.0})
         self.assertEqual(extract_numbers("x₁=3.0, x₂=2.0"), {3.0, 2.0})
 
+    def test_multi_character_subscript_stripped(self):
+        # 连续下标必须整体剥掉，否则残留数字会污染根集合
+        self.assertEqual(extract_numbers("x₁₂=3"), {3.0})
+
     def test_empty(self):
         self.assertEqual(extract_numbers(""), set())
 
