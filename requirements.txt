@@ -7,19 +7,18 @@ langchain>=1.0
 langchain-openai>=1.0
 langgraph>=0.5
 
-# --- RAG / 向量检索（V2 起用到）---
-langchain-huggingface>=1.0
-langchain-chroma>=1.0
-langchain-text-splitters>=1.0
-sentence-transformers>=3.0
-
-# --- Web 服务（V3 起用到）---
-fastapi>=0.115
-uvicorn>=0.30
-
 # --- 数据层 ---
 sqlalchemy>=2.0
 pydantic>=2.0
 
 # --- 工具 ---
 python-dotenv>=1.0
+pytest>=8.0
+
+# --- V2/V3 起用（届时取消注释）---
+# langchain-huggingface>=1.0
+# langchain-chroma>=1.0
+# langchain-text-splitters>=1.0
+# sentence-transformers>=3.0
+# fastapi>=0.115
+# uvicorn>=0.30

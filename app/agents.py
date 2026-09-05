@@ -7,6 +7,7 @@ import random
 import math
 import os
 import re
+from functools import lru_cache
 from pydantic import BaseModel, Field
 from typing import Literal, Optional
 
@@ -133,6 +134,7 @@ def _question_roots(question: dict) -> list[float]:
     return sorted(extract_numbers(question["answer"]))
 # ========== LLM 初始化 ==========
 
+@lru_cache(maxsize=1)
 def get_llm() -> ChatOpenAI:
     """从 .env 加载配置，初始化 LLM。"""
     from dotenv import load_dotenv
