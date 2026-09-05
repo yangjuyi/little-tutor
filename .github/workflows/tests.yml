@@ -13,4 +13,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      # 测试全链路 mock LLM 调用，但 grade_node 会构造客户端（需要非空 key 形参）；
+      # 占位 key 不产生任何真实网络调用
       - run: python -m unittest discover tests -v
+        env:
+          OPENAI_API_KEY: dummy-key-for-client-construction
