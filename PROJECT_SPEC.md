@@ -892,11 +892,36 @@ Docker 重启时正在执行的 Grader 调用会被中断。FastAPI lifespan han
 - 2026-09-03：`mastery.wrong_count` 更名 `confirmed_wrong_count`（原义"答错次数"与实际语义
   "被老师确认的答错次数"不符，reject 的建议不计）；`questions.source` 词汇统一为
   `public/private/ai_generated`
+- 2026-09-05（外部评审核实补账）：①§16.5 掌握度规则未实现——`propose_profile_change`
+  一题一档（对→mid/错→weak）且 `apply_to_db` 直接覆盖 level，strong 无任何产生路径，
+  当前"自适应"是单题记忆（原漏记，为最大未记账差异）；②难度非受控变量——
+  `pick_difficulty` 结果仅作 prompt 形容词，(a,b,c) 无难度约束，难度→正确率无法归因；
+  ③H1 组卷预审未实现，AI 题直接给学生（§7 底线被绕过），每题 interrupt 与
+  §16.1 决策#7"消灭高频打断"冲突；④Grader 无过程证据——CLI 只收最终答案，
+  模板填空未建，AI 归因在零过程证据下运行，靠程序仲裁 + 老师终审兜底不污染画像；
+  ⑤`get_llm` 单实例 temperature=0.7 出题/批改共享，归因需要 0（按任务配温度留 V2）
+
+### 改进路线定案（2026-09-05，三根传动轴顺序 B→A→C）
+1. **B（先做，还债）**：§16.5 掌握度规则落地（连击升级：连续两次答对才允许升一级，
+   错一次清零，mastery 加连击字段——注意 create_all 只增不改，需重建库，Alembic 需求实证）；
+   难度参数约束表（simple：a=1 且整数根；mid：a≠1 整数根；hard：分数根/更大系数），
+   参数生成后程序校验难度约束（违约走既有重试机制）；`answer_records` 记难度快照
+   （正确率归因的前提）；学生即时反馈（批改完直接打印程序判定的对错，五行改动，
+   落地"AI 初评/老师终审"两分法）
+2. **A（第二，用户价值最大）**：模板填空作答（依据点选 + 式子填空、逐空判定）落地，
+   Grader 从"猜"变"定位断点"；这是 §9 答题链路设计的实现，也是 C 的前提
+3. **C（最后，结构重构）**：会话级图（§16.2 已有设计稿）——H1 组卷预审一次过 +
+   会话级 H3 批量确认，消灭每题打断；验收标准 = 一次会话打断老师 ≤2 次 +
+   黄金演示脚本 3 分钟讲清"越练越准"（摸底会话 → 第二次会话出题侧重可见变化 →
+   正确率趋势）
+- 家长会话简报（对几题/错因分布/老师结论）进 V2 路线图（留存杠杆，SPEC 原无此角色）
 
 ### 下一步建议
-1. P2：SqliteSaver 持久化 checkpoint / Send 并发 / 子图 / LLM 全局异常兜底
-2. 多学生服务化前补 user/session_counter 表 + session_id 原子生成
-3. 手撕代码练习路线（见记忆笔记）：profile_update → graph → agents → state → db/run_mvp
+1. P2 先还债：B（掌握度规则 + 难度参数化）→ A（模板填空）→ C（会话级图），
+   顺序见上"改进路线定案"
+2. P2 并行：SqliteSaver 持久化 checkpoint / Send 并发 / 子图 / LLM 全局异常兜底
+3. 多学生服务化前补 user/session_counter 表 + session_id 原子生成
+4. 手撕代码练习路线（见记忆笔记）：profile_update → graph → agents → state → db/run_mvp
 
 ---
 
