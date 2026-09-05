@@ -5,9 +5,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- CI 门禁：GitHub Actions 在 push/PR 时运行全量离线测试（Python 3.12 + unittest）
+
 ### Removed
 
 - 将本仓库的维护说明改为本地文件，不再随仓库发布
+
+### Changed
+
+- 测试目录工程化：课程练习命名的 `test_l5_l6.py` 更名 `test_hitl_flow.py`（内容为
+  HITL 守护/路由/落库分流的项目测试）
+- `get_llm` 加 `lru_cache` 单实例缓存，图节点不再重复构建 LLM 客户端
+- `requirements.txt` 拆分：V1 核心依赖 + pytest 入册；V2/V3 重依赖
+  （chroma/sentence-transformers/fastapi 等）注释待启用，装包不再带未用组件
 
 ### Fixed
 
@@ -35,6 +47,11 @@
   难度非受控变量 / H1 缺失与高频打断 / Grader 无过程证据 / 温度共享），
   并定案改进路线：掌握度规则 + 难度参数化 → 模板填空 → 会话级图重构，
   家长会话简报与学生即时反馈进 V2 路线
+- 三方评审统合落账：§15 差异记账补 prompt 文件债与难度词汇表三套并存；
+  改进路线加 B0（DifficultyLevel 独立类型）与 B3 改 JOIN 归因（零 schema）；
+  §10.4/§13.4 知识卡口径改 V3；§13.9/§13.5 降级条目逐条加触发条件；
+  §16.1④ 改题 A/B 降级（触发=真实使用信号）、§8.5 求助机制随 P3；
+  README 路线表拆注 V1 还债项与真 V2 产品项
 
 ### Changed
 
