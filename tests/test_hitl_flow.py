@@ -7,9 +7,11 @@ import unittest
 from unittest.mock import patch
 
 from langgraph.types import Command
+from langgraph.checkpoint.memory import InMemorySaver
 
-from app.graph import route_by_phase, build_tutor_graph
-from app.profile_update import build_profile_graph, propose_profile_change
+from app.application.teacher_review import propose_profile_change
+from app.harness.legacy_graph import build_tutor_graph, route_by_phase
+from app.harness.profile_graph import build_profile_graph
 
 
 FAKE_GRADE_WRONG = {
@@ -27,6 +29,13 @@ FAKE_GRADE_WRONG = {
         "insufficient_evidence": False,
     },
     "steps": [],
+}
+
+_FAKE_MASTERY = {
+    "suggest_level": "weak",
+    "confidence": 0.0,
+    "evidence": "test",
+    "sessions": 0,
 }
 
 
@@ -67,7 +76,10 @@ class TestProfileUpdateGraph(unittest.TestCase):
 
     def _invoke_grade(self, graph, config):
         # mock 掉批改的 LLM 调用，从 grade 入口走完整链路（离线）
-        with patch("app.graph.grade_question", return_value=FAKE_GRADE_WRONG):
+        with patch(
+            "app.harness.legacy_graph.grade_question",
+            return_value=FAKE_GRADE_WRONG,
+        ):
             graph.invoke(
                 {
                     "student_id": "999",
@@ -79,48 +91,44 @@ class TestProfileUpdateGraph(unittest.TestCase):
             )
 
     def test_accept_persists_once(self):
-        with patch("app.profile_update.apply_to_db") as mock_db, \
-             patch("app.profile_update.record_answer"), \
-             patch("app.profile_update.record_teacher_decision"):
-            graph = build_tutor_graph()
+        with patch("app.harness.profile_graph.persist_review") as mock_persist, \
+             patch("app.application.teacher_review.propose_mastery_change", return_value=dict(_FAKE_MASTERY)):
+            graph = build_tutor_graph(InMemorySaver())
             config = {"configurable": {"thread_id": "ut-accept"}}
             self._invoke_grade(graph, config)
-            mock_db.assert_not_called()  # 暂停时绝不能提前落库
+            mock_persist.assert_not_called()  # 暂停时绝不能提前落库
             final = graph.invoke(Command(resume="accept"), config)
-            mock_db.assert_called_once()  # accept 恰好写一次
+            mock_persist.assert_called_once()  # accept 恰好落库一次
             self.assertEqual(final["teacher_decision"], "accept")
 
     def test_reject_never_persists(self):
-        with patch("app.profile_update.apply_to_db") as mock_db, \
-             patch("app.profile_update.record_answer") as mock_record, \
-             patch("app.profile_update.record_teacher_decision") as mock_decision:
-            graph = build_tutor_graph()
+        with patch("app.harness.profile_graph.persist_review") as mock_persist, \
+             patch("app.application.teacher_review.propose_mastery_change", return_value=dict(_FAKE_MASTERY)):
+            graph = build_tutor_graph(InMemorySaver())
             config = {"configurable": {"thread_id": "ut-reject"}}
             self._invoke_grade(graph, config)
             final = graph.invoke(Command(resume="reject"), config)
-            mock_db.assert_not_called()      # 老师否决 → mastery 不写
-            mock_record.assert_called_once() # 但做题事实要留痕
-            mock_decision.assert_called_once()  # 仲裁决定也留痕（reject 可追溯）
+            mock_persist.assert_called_once()
+            self.assertEqual(mock_persist.call_args.args[4], "reject")
             self.assertEqual(final["teacher_decision"], "reject")
 
     def test_pause_payload_contains_proposal(self):
-        graph = build_tutor_graph()
-        config = {"configurable": {"thread_id": "ut-payload"}}
-        self._invoke_grade(graph, config)
-        snap = graph.get_state(config)
-        payload = snap.tasks[0].interrupts[0].value
-        self.assertIn("proposal", payload)
-        self.assertEqual(payload["proposal"]["kp_id"], "39")
-        self.assertEqual(snap.next, ("profile_update",))
+        with patch("app.application.teacher_review.propose_mastery_change", return_value=dict(_FAKE_MASTERY)):
+            graph = build_tutor_graph(InMemorySaver())
+            config = {"configurable": {"thread_id": "ut-payload"}}
+            self._invoke_grade(graph, config)
+            snap = graph.get_state(config)
+            payload = snap.tasks[0].interrupts[0].value
+            self.assertIn("proposal", payload)
+            self.assertEqual(payload["proposal"]["kp_id"], "39")
+            self.assertEqual(snap.next, ("profile_update",))
 
     def test_missing_question_fails_before_interrupt(self):
         """缺 question 必须在打扰老师之前报错，而不是拍板后落库时崩"""
-        graph = build_profile_graph()
+        graph = build_profile_graph(InMemorySaver())
         config = {"configurable": {"thread_id": "ut-no-question"}}
         with self.assertRaises(ValueError), \
-             patch("app.profile_update.record_answer"), \
-             patch("app.profile_update.record_teacher_decision"), \
-             patch("app.profile_update.apply_to_db"):
+             patch("app.harness.profile_graph.persist_review"):
             graph.invoke(
                 {
                     "student_id": "999",

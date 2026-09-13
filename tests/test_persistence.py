@@ -9,12 +9,15 @@ import unittest
 from unittest.mock import patch
 
 from langgraph.types import Command
+from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-import app.db as db
-import app.profile_update as pu
-from app.graph import build_tutor_graph
+import app.adapters.persistence as db
+import app.adapters.review_store as review_store
+import app.adapters.session_store as session_store
+import app.application.profile_evidence as profile_evidence
+from app.harness.legacy_graph import build_tutor_graph
 
 
 class TestPersistence(unittest.TestCase):
@@ -33,7 +36,9 @@ class TestPersistence(unittest.TestCase):
         Session = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
         self._patches = [
             patch.object(db, "SessionLocal", Session),
-            patch.object(pu, "SessionLocal", Session),
+            patch.object(review_store, "SessionLocal", Session),
+            patch.object(profile_evidence, "SessionLocal", Session),
+            patch.object(session_store, "SessionLocal", Session),
         ]
         for p in self._patches:
             p.start()
@@ -78,8 +83,11 @@ class TestPersistence(unittest.TestCase):
         }
 
     def _run(self, decision: str) -> dict:
-        with patch("app.graph.grade_question", return_value=self._fake_grade()):
-            graph = build_tutor_graph()
+        with patch(
+            "app.harness.legacy_graph.grade_question",
+            return_value=self._fake_grade(),
+        ):
+            graph = build_tutor_graph(InMemorySaver())
             config = {"configurable": {"thread_id": "t-persist"}}
             graph.invoke(
                 {
@@ -102,7 +110,7 @@ class TestPersistence(unittest.TestCase):
         final = self._run("accept")
         self.assertEqual(final["teacher_decision"], "accept")
 
-        Session = pu.SessionLocal
+        Session = review_store.SessionLocal
         with Session() as s:
             m = s.query(db.Mastery).filter_by(
                 student_id=self.student_id, kp_id=self.kp_id
@@ -127,7 +135,7 @@ class TestPersistence(unittest.TestCase):
         final = self._run("reject")
         self.assertEqual(final["teacher_decision"], "reject")
 
-        Session = pu.SessionLocal
+        Session = review_store.SessionLocal
         with Session() as s:
             self.assertEqual(s.query(db.Mastery).count(), 0)  # 否决 → 画像不写
             self.assertEqual(s.query(db.AnswerRecord).count(), 1)  # 做题事实保留

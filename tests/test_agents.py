@@ -4,15 +4,17 @@ Run with: .venv/Scripts/python -m unittest tests.test_agents -v
 """
 
 import unittest
+from unittest import mock
 from collections import Counter
 
-from app.agents import (
-    pick_difficulty,
-    compute_answer,
-    validate_params,
-    extract_numbers,
+from app.adapters.llm import generate_question, grade_question
+from app.domain.grading import (
     check_is_correct,
-    grade_question,
+    compute_answer,
+    extract_numbers,
+    pick_difficulty,
+    validate_difficulty_params,
+    validate_params,
 )
 
 
@@ -214,6 +216,176 @@ class TestGradeQuestionIntegration(unittest.TestCase):
     def test_full_answer_accepted_normal_format(self):
         result = self._grade("x1=3, x2=2")
         self.assertTrue(result["is_correct"])
+
+
+class _ExplodingStructuredLLM:
+    """LLM 挂掉的离线替身：结构化输出调用必炸（测全局异常兜底）"""
+
+    def with_structured_output(self, model, method=None):
+        class _Stub:
+            @staticmethod
+            def invoke(prompt):
+                raise RuntimeError("api down")
+
+        return _Stub()
+
+
+class TestGradeFallback(unittest.TestCase):
+    """P2 LLM 兜底：归因挂掉时保住程序判分事实，降级为仅程序证据"""
+
+    QUESTION = {
+        "id": "q-1",
+        "kp_id": "39",
+        "stem": "已知方程 x² - 5x + 6 = 0",
+        "answer": "x₁=3.0, x₂=2.0",
+        "params": {"a": 1.0, "b": -5.0, "c": 6.0},
+    }
+
+    def _grade(self, student_result):
+        return grade_question(
+            dict(self.QUESTION),
+            [{"basis": "求解", "result": student_result}],
+            _ExplodingStructuredLLM(),
+        )
+
+    def test_wrong_answer_falls_back_to_program_verdict(self):
+        result = self._grade("3")
+        self.assertFalse(result["is_correct"])                     # 程序事实保住
+        self.assertEqual(result["error"]["error_type"], "未归因")
+        self.assertEqual(result["error"]["evidence_source"], "program")
+        self.assertTrue(result["error"]["insufficient_evidence"])
+
+    def test_correct_answer_falls_back_cleanly(self):
+        result = self._grade("x1=3, x2=2")
+        self.assertTrue(result["is_correct"])
+        self.assertEqual(result["error"]["error_type"], "无错")
+        self.assertEqual(result["error"]["evidence_source"], "program")
+
+
+class TestValidateDifficultyParams(unittest.TestCase):
+    """难度带校验（B2：难度受控化）"""
+
+    def test_simple_valid(self):
+        self.assertIsNone(validate_difficulty_params(1, -6, 8, "simple"))
+
+    def test_simple_rejects_leading_coefficient(self):
+        result = validate_difficulty_params(2, -7, 3, "simple")
+        self.assertIn("不在 simple 难度范围", result)
+
+    def test_rejects_non_integer_coefficients(self):
+        result = validate_difficulty_params(1, -5.5, 6, "simple")
+        self.assertIn("系数必须为整数", result)
+
+    def test_rejects_irrational_roots(self):
+        # x² + x - 1 = 0：判别式 5 不是完全平方数
+        result = validate_difficulty_params(1, 1, -1, "simple")
+        self.assertIn("完全平方数", result)
+
+    def test_mid_valid_with_clean_completion(self):
+        # 2x² - 8x + 6 = 0 → 除以 2 后 x² - 4x + 3，配方中间值均为整数
+        self.assertIsNone(validate_difficulty_params(2, -8, 6, "mid"))
+
+    def test_mid_rejects_unclean_completion(self):
+        # 2x² - 7x + 3 = 0 的根简单，但配方法会出现 3.0625
+        result = validate_difficulty_params(2, -7, 3, "mid")
+        self.assertIn("整数", result)
+
+    def test_mid_rejects_a_out_of_band(self):
+        result = validate_difficulty_params(6, -13, 6, "mid")
+        self.assertIn("不在 mid 难度范围", result)
+
+    def test_rejects_negative_discriminant(self):
+        result = validate_difficulty_params(2, 2, 5, "mid")
+        self.assertIn("无实数解", result)
+
+    def test_rejects_b_out_of_bound(self):
+        result = validate_difficulty_params(2, -25, 0, "mid")
+        self.assertIn("超出 mid 难度上限", result)
+
+    def test_hard_requires_structure_tag(self):
+        result = validate_difficulty_params(3, -12, 9, "hard", "")
+        self.assertIn("结构标记", result)
+
+    def test_hard_valid_with_structure_tag(self):
+        self.assertIsNone(validate_difficulty_params(3, -12, 9, "hard", "多步化简"))
+
+    def test_all_zero_rejected(self):
+        result = validate_difficulty_params(0, 0, 0, "simple")
+        self.assertIn("a 不能为 0", result)
+
+
+class _QueueStructuredLLM:
+    """按序返回 payload 的离线替身，用于测试重试与降级路径"""
+
+    def __init__(self, *payloads):
+        self._payloads = list(payloads)
+        self.prompts = []
+
+    def with_structured_output(self, model, method=None):
+        outer = self
+
+        class _Stub:
+            @staticmethod
+            def invoke(prompt):
+                outer.prompts.append(prompt)
+                return model(**outer._payloads.pop(0))
+
+        return _Stub()
+
+
+class TestGenerateQuestionDifficulty(unittest.TestCase):
+    """generate_question 难度带校验 + 降级 + 重试（离线，不调真实 LLM）"""
+
+    def _generate(self, difficulty, *payloads):
+        fake_llm = _QueueStructuredLLM(*payloads)
+        with mock.patch(
+            "app.adapters.llm.pick_difficulty", return_value=difficulty
+        ):
+            question = generate_question("weak", "配方法", fake_llm)
+        return question, fake_llm
+
+    def test_valid_hard_question(self):
+        question, _ = self._generate(
+            "hard",
+            {"a": 3, "b": -12, "c": 9, "stem_context": "工程配比", "structure_tag": "多步化简"},
+        )
+        self.assertEqual(question["difficulty"], "hard")
+        self.assertEqual(question["params"]["a"], 3)
+        self.assertEqual(question["params"]["structure_tag"], "多步化简")
+        self.assertIn("x²", question["stem"])
+
+    def test_valid_simple_question(self):
+        question, _ = self._generate(
+            "simple",
+            {"a": 1, "b": -6, "c": 8, "stem_context": "面积问题", "structure_tag": ""},
+        )
+        self.assertEqual(question["difficulty"], "simple")
+
+    def test_hard_without_tag_downgrades_to_mid(self):
+        # a=3 落在 mid 带内：缺结构标记不整题作废，降级为 mid
+        question, _ = self._generate(
+            "hard",
+            {"a": 3, "b": -12, "c": 9, "stem_context": "工程配比", "structure_tag": ""},
+        )
+        self.assertEqual(question["difficulty"], "mid")
+
+    def test_hard_big_coefficient_no_tag_retries(self):
+        # a=6 超出 mid 带：不能降级，必须带边界信息重试
+        question, fake_llm = self._generate(
+            "hard",
+            {"a": 6, "b": -12, "c": 0, "stem_context": "间距设计", "structure_tag": ""},
+            {"a": 3, "b": -12, "c": 9, "stem_context": "工程配比", "structure_tag": "多步化简"},
+        )
+        self.assertEqual(question["difficulty"], "hard")
+        self.assertIn("结构标记", fake_llm.prompts[1])
+
+    def test_double_invalid_raises(self):
+        with self.assertRaises(ValueError):
+            self._generate(
+                "hard",
+                {"a": 6, "b": -12, "c": 0, "stem_context": "间距设计", "structure_tag": ""},
+                {"a": 6, "b": -12, "c": 0, "stem_context": "间距设计", "structure_tag": ""},
+            )
 
 
 if __name__ == "__main__":

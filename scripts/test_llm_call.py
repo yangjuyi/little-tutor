@@ -6,9 +6,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from app.agents import get_llm, generate_question
+from app.adapters.llm import generate_question, get_llm
 
-llm = get_llm()
+llm = get_llm("question")
 print("Model:", llm.model_name)
 print("Base URL:", llm.openai_api_base)
 print()

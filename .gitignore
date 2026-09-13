@@ -4,6 +4,7 @@
 # Python
 __pycache__/
 *.pyc
+.pytest_cache/
 .venv/
 venv/
 
@@ -15,8 +16,12 @@ venv/
 *.db
 *.sqlite3
 chroma_db/
+data/private_questions/
 
 # 私有资料与本地协作文件
 .agents-migration/
 practice/
 MAINTAINERS.md
+outputs/playwright/
+scripts/enable_memory_write.ps1
+scripts/memory_notes/

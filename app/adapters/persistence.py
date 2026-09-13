@@ -1,27 +1,25 @@
 """
-app/db.py — SQLite 连接与建表（SQLAlchemy 2.x）
-=================================================
+SQLite 连接与建表（SQLAlchemy 2.x）。
 
 数据层设计见 PROJECT_SPEC.md 第 6 章 + §16：
-- 7 张表：students / knowledge_points / questions / mastery / answer_records /
-  profiles / teacher_decisions
+- 8 张表：students / knowledge_points / questions / mastery / answer_records /
+  practice_sessions / profiles / teacher_decisions
 - 掌握度 3 级（MasteryLevel，与难度混合矩阵同一套词汇），学生画像存 JSON
 - SQLAlchemy ORM 抽象，未来可平滑切换 Postgres
 
 用法：
-    from app.db import init_db, SessionLocal
+    from app.adapters.persistence import init_db, SessionLocal
     init_db()                 # 建表（幂等）
     with SessionLocal() as s: # 操作数据库
         ...
 命令行直接初始化：
-    python -m app.db
+    python -m app.adapters.persistence
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
 
 from sqlalchemy import (
     JSON,
@@ -42,8 +40,8 @@ from sqlalchemy.orm import (
     sessionmaker,
 )
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DATABASE_URL = f"sqlite:///{BASE_DIR / 'tutor.db'}"
+from app.runtime import BASE_DIR, DATABASE_PATH
+DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
 engine = create_engine(
     DATABASE_URL,
@@ -126,8 +124,9 @@ class Question(Base):
     options: Mapped[list | None] = mapped_column(JSON, nullable=True)   # 选项（选择题）
     answer: Mapped[str] = mapped_column(Text)                           # 答案
     analysis: Mapped[str | None] = mapped_column(Text, nullable=True)   # 解析
-    difficulty: Mapped[str] = mapped_column(String(20), default="中等")  # 题目难度 simple/mid/hard（与知识点难度中文词表不同）
+    difficulty: Mapped[str] = mapped_column(String(20), default="simple")  # 题目难度 simple/mid/hard（与知识点难度中文词表不同）
     source: Mapped[str] = mapped_column(String(20), default="ai_generated")  # public/private/ai_generated（SPEC §6.1）
+    params: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # (a,b,c,structure_tag)：程序算答案与作答模板的单一事实源
 
     knowledge_point: Mapped[KnowledgePoint] = relationship(back_populates="questions")
 
@@ -169,12 +168,45 @@ class AnswerRecord(Base):
     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id"), index=True)
     answer: Mapped[str] = mapped_column(Text)                            # 学生提交的答案
     is_correct: Mapped[bool] = mapped_column(default=False)
+    attempt_no: Mapped[int] = mapped_column(default=1)
+    first_attempt_correct: Mapped[bool] = mapped_column(default=False)
+    hint_count: Mapped[int] = mapped_column(default=0)
+    scaffold_level: Mapped[int] = mapped_column(default=0)
+    assistance_level: Mapped[str] = mapped_column(String(20), default="independent")
+    evidence_weight: Mapped[float] = mapped_column(default=1.0)
     used_seconds: Mapped[int] = mapped_column(default=0)
     error_type: Mapped[str | None] = mapped_column(String(30), nullable=True)  # 8 类易错之一
     session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
     student: Mapped[Student] = relationship(back_populates="answers")
+
+
+class PracticeSessionRecord(Base):
+    """一次练习会话的业务生命周期。
+
+    LangGraph checkpoint 只恢复流程，本表负责区分真实、测试、完成、中断和
+    老师审核状态，作为画像证据的准入边界。
+    """
+
+    __tablename__ = "practice_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), index=True)
+    kp_id: Mapped[int] = mapped_column(ForeignKey("knowledge_points.id"), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="started", index=True)
+    review_status: Mapped[str] = mapped_column(
+        String(20), default="pending", index=True
+    )
+    data_source: Mapped[str] = mapped_column(String(20), default="real", index=True)
+    lease_owner: Mapped[str | None] = mapped_column(
+        String(80), nullable=True, index=True
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, index=True
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 # ============================================================
@@ -221,9 +253,104 @@ class Profile(Base):
 # ============================================================
 # 初始化
 # ============================================================
+
+def accuracy_by_difficulty(
+    kp_id: int | None = None,
+    student_id: int | None = None,
+    session_id: str | None = None,
+) -> dict[str, dict[str, float]]:
+    """各难度正确率（B3 正确率归因）。
+
+    answer_records JOIN questions 按 difficulty 聚合；难度已受控（B2），
+    该统计用于验证"难度→正确率"的归因链路。
+
+    Returns:
+        {difficulty: {"total": n, "correct": n, "accuracy": 0.0~1.0}}
+    """
+    with SessionLocal() as s:
+        query = (
+            s.query(Question.difficulty, AnswerRecord.is_correct)
+            .join(AnswerRecord, AnswerRecord.question_id == Question.id)
+        )
+        if kp_id is not None:
+            query = query.filter(Question.kp_id == kp_id)
+        if student_id is not None:
+            query = query.filter(AnswerRecord.student_id == student_id)
+        if session_id is not None:
+            query = query.filter(AnswerRecord.session_id == session_id)
+        stats: dict[str, dict[str, float]] = {}
+        for difficulty, is_correct in query:
+            bucket = stats.setdefault(difficulty, {"total": 0, "correct": 0})
+            bucket["total"] += 1
+            if is_correct:
+                bucket["correct"] += 1
+    for bucket in stats.values():
+        bucket["accuracy"] = round(bucket["correct"] / bucket["total"], 4)
+    return stats
+
+
 def init_db() -> None:
     """创建所有表（幂等：已存在则跳过）"""
     Base.metadata.create_all(engine)
+    if engine.url.get_backend_name() == "sqlite":
+        _ensure_answer_evidence_columns()
+        _ensure_practice_lease_columns()
+
+
+def _ensure_answer_evidence_columns() -> None:
+    """兼容旧 SQLite 文件：补齐首次作答与受助证据字段。"""
+    additions = (
+        ("attempt_no", "INTEGER NOT NULL DEFAULT 1"),
+        ("first_attempt_correct", "BOOLEAN NOT NULL DEFAULT 0"),
+        ("hint_count", "INTEGER NOT NULL DEFAULT 0"),
+        ("scaffold_level", "INTEGER NOT NULL DEFAULT 0"),
+        ("assistance_level", "VARCHAR(20) NOT NULL DEFAULT 'independent'"),
+        ("evidence_weight", "FLOAT NOT NULL DEFAULT 1.0"),
+    )
+    with engine.begin() as conn:
+        columns = {
+            row[1]
+            for row in conn.exec_driver_sql(
+                "PRAGMA table_info(answer_records)"
+            ).fetchall()
+        }
+        for name, ddl in additions:
+            if name not in columns:
+                conn.exec_driver_sql(
+                    f"ALTER TABLE answer_records ADD COLUMN {name} {ddl}"
+                )
+        if "first_attempt_correct" not in columns:
+            conn.exec_driver_sql(
+                "UPDATE answer_records SET first_attempt_correct = is_correct"
+            )
+        if "evidence_weight" not in columns:
+            conn.exec_driver_sql(
+                "UPDATE answer_records SET evidence_weight = CASE "
+                "WHEN is_correct = 0 THEN 0.0 "
+                "WHEN scaffold_level > 0 THEN 0.25 "
+                "WHEN hint_count > 0 THEN 0.5 "
+                "ELSE 1.0 END"
+            )
+
+
+def _ensure_practice_lease_columns() -> None:
+    """兼容旧 SQLite 文件：补齐跨 worker 会话租约字段。"""
+    additions = (
+        ("lease_owner", "VARCHAR(80)"),
+        ("lease_expires_at", "DATETIME"),
+    )
+    with engine.begin() as conn:
+        columns = {
+            row[1]
+            for row in conn.exec_driver_sql(
+                "PRAGMA table_info(practice_sessions)"
+            ).fetchall()
+        }
+        for name, ddl in additions:
+            if name not in columns:
+                conn.exec_driver_sql(
+                    f"ALTER TABLE practice_sessions ADD COLUMN {name} {ddl}"
+                )
 
 
 if __name__ == "__main__":

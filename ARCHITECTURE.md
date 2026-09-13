@@ -1,0 +1,118 @@
+# little-tutor 架构约定
+
+本文件定义后续代码的结构标准。产品设计以 `PROJECT_SPEC.md` 为准，本文件只约束
+分层、依赖方向和职责边界。
+
+## 定位
+
+little-tutor 是面向一对一教学的智能教学系统：
+
+- 教学领域模型是核心；
+- Harness 负责控制 Agent 的流程、反馈、重试、记忆和老师介入；
+- 应用层负责学生、老师的一次完整用例；
+- 体验层按角色提供学生空间与老师工作台；
+- 模型、数据库、checkpoint、OCR 等具体技术放在适配器层。
+
+Harness 不是最外层皮肤，而是中间控制层。内部状态不能直接暴露给学生或老师。
+
+## 当前分层
+
+```text
+app/
+  domain/          # 判分、题型、模板、掌握度、会话与证据契约
+  harness/         # LangGraph 编排、组卷、Agent 状态、旧版兼容图
+  application/     # 学生练习、老师审核、画像证据、会话报告
+  adapters/        # LLM、SQLAlchemy、checkpoint、题库、会话存储
+  web/             # 学生路由、老师路由、视图模型
+  templates/       # 学生端与老师端页面
+  cli.py           # 会话制命令行入口
+```
+
+## 依赖方向
+
+```text
+web -> application -> domain
+                  -> harness -> domain
+                  -> adapters
+```
+
+- `domain` 不依赖 Web、LangGraph、SQLAlchemy。
+- `harness` 可以调用 `domain` 和适配器接口，不生成页面。
+- `application` 组织一次完整用例，不处理 HTTP 细节。
+- `web` 只调用 `application`，不直接读 checkpoint、ORM 或图状态。
+- `adapters` 实现外部技术接入，不决定教学策略。
+
+## 硬规则
+
+1. 学生端不能出现 `thread_id`、`session_id`、H1/H3、interrupt 等内部概念。
+2. 老师端只呈现决策所需事实、证据、异常和结果。
+3. 答题事实、会话结果、老师确认后的画像证据必须分离。
+4. 测试、冒烟和评测只能使用隔离运行目录，禁止写生产数据库。
+5. 模型调用必须经过模型适配器，不在业务模块写死供应商。
+6. 过程反馈、最终判定、画像更新分别记录，不能混成一个 `is_correct`。
+7. 结构化题目必须通过题型语义契约：题干事实与参数冲突时不得进入已审核题池，
+   校验失败必须回到审核状态，不能破坏 H1 会话。
+8. 题目答案、有效根、解析和作答模板只能由题干契约与结构化参数派生，数据库
+   不可作为第二事实源。
+9. 学生路由不得自动进入老师审核流程；老师入口必须独立并在部署时启用访问控制。
+10. 同一会话的写操作必须持有数据库租约，不能依赖进程内锁或单 worker 假设。
+
+## 当前完成状态
+
+1. Web 已拆为学生路由、老师路由、视图模型。
+2. 学生练习、老师审核、画像证据已进入应用层。
+3. LLM、持久化、checkpoint、题库、会话归档已进入适配器层。
+4. 数学规则、模板、题型、领域模型已进入领域层。
+5. LangGraph 状态与会话级图已进入 Harness 层。
+6. 旧根目录实现模块已删除，当前只保留 `cli.py` 和 `runtime.py`。
+7. 组卷与候选物化已拆入 `harness/question_assembly.py`。
+8. 会话写并发由数据库租约控制，不再依赖单进程内存锁。
+
+## 学科与训练插件
+
+V3 起新增学科能力时，不把物理、化学规则塞进数学实现，也不建立一个包办一切的
+“综合插件”。插件分成三类：
+
+1. `SubjectPlugin`：单个学科的题面解析、答案 schema、单位规则、求解器、
+   判分器和证据分级。
+2. `TrainingPlugin`：一次训练的知识点、学科配比、难度、题型、提示策略和报告
+   维度。
+3. `IntegratedPlugin`：一道真正跨学科题目的组合求解链，例如物理描述 + 数学
+   方程求解 + 物理单位校验。
+
+共享核心永远保留以下能力，不交给学科插件重写：
+
+- 会话生命周期、checkpoint、持久化；
+- 作答事实、证据分级、掌握度和置信度；
+- Harness 编排、老师介入和画像更新；
+- 测试隔离、权限和运行环境。
+
+建议目标目录：
+
+```text
+app/domain/plugins/
+  contracts.py
+  registry.py
+  subjects/
+    math/
+    physics/
+    chemistry/
+  training/
+    math_drill.py
+    science_mixed.py
+    diagnostic.py
+  integrated/
+    physics_math.py
+    chemistry_math.py
+```
+
+插件只扩展领域能力，不重写 Harness 和业务闭环。
+
+## 后续工作
+
+1. 接入首次作答、提示次数和受助程度。
+2. 让老师审核支持修正等级、错因和测试标记。
+3. 将会话状态、证据等级和掌握度置信度继续规则化。
+4. 评估旧串图 `harness/legacy_graph.py` 是否退役。
+
+未决设计问题记录在 `ARCHITECTURE_QUESTIONS.md`。

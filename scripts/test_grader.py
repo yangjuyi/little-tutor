@@ -6,14 +6,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from app.agents import get_llm, generate_question, grade_question
+from app.adapters.llm import generate_question, get_llm, grade_question
 
-llm = get_llm()
+question_llm = get_llm("question")
+grade_llm = get_llm("grade")
 print("=== Step 1: generate question ===")
 question = generate_question(
     mastery_level="weak",
     kp_name="配方法解一元二次方程",
-    llm=llm,
+    llm=question_llm,
 )
 print(f"stem: {question['stem']}")
 print(f"answer: {question['answer']}")
@@ -29,7 +30,7 @@ student_steps = [
 print(f"student_steps: {student_steps}")
 
 print("\n=== Step 3: grade ===")
-result = grade_question(question, student_steps, llm)
+result = grade_question(question, student_steps, grade_llm)
 
 print(f"is_correct: {result['is_correct']}")
 print(f"error_type: {result['error']['error_type']}")

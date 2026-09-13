@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>本次练习结果</title>
+<style>
+:root{--blue:#1a5fb4;--green:#0a7d28;--red:#b3261e;--line:#dfe3e7;--muted:#66707a}
+*{box-sizing:border-box}
+body{font-family:sans-serif;max-width:980px;margin:0 auto;padding:24px 18px 40px;background:#f5f6f8;color:#222}
+h1{margin:0 0 8px;font-size:28px}
+h2{margin:0 0 4px;font-size:19px}
+.status{color:var(--muted);margin:0 0 18px}
+.status.ok{color:var(--green);font-weight:bold}
+.status.warn{color:#8a5a00;font-weight:bold}
+.summary{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.metric{background:#fff;border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.metric .label{color:var(--muted);font-size:13px}
+.metric b{display:block;font-size:24px;margin-top:3px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.card{background:#fff;border:1px solid var(--line);border-radius:8px;padding:16px}
+.chart-wrap{position:relative;width:100%;height:320px;margin-top:8px}
+canvas{display:block;width:100%;height:100%}
+.facts{list-style:none;padding:0;margin:10px 0 0;color:#444;font-size:14px}
+.facts li{display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid #eef0f2}
+.facts li:first-child{border-top:0}
+.no-errors{color:var(--green);font-weight:bold;margin-top:14px}
+.actions{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
+.btn{display:inline-block;text-decoration:none;padding:10px 14px;border-radius:6px;font-size:15px}
+.primary{background:var(--blue);color:#fff}
+.secondary{background:#fff;color:var(--blue);border:1px solid var(--blue)}
+@media(max-width:720px){.grid{grid-template-columns:1fr}.summary{grid-template-columns:1fr}.chart-wrap{height:300px}}
+</style>
+</head>
+<body>
+<h1>本次练习结果</h1>
+{% if h3_decision == "accept" %}
+<p class="status ok">学生画像已更新，后续出题会参考本次练习表现。</p>
+{% else %}
+<p class="status warn">本次未更新学生画像，答题记录和老师决定已保留。</p>
+{% endif %}
+
+<div class="summary">
+  <div class="metric"><span class="label">完成题数</span><b>{{ total }}</b></div>
+  <div class="metric"><span class="label">答对</span><b>{{ correct }}</b></div>
+  <div class="metric"><span class="label">正确率</span><b>{{ (session_rate * 100) | round(0) | int }}%</b></div>
+</div>
+
+<div class="grid">
+  <section class="card">
+    <h2>学生画像</h2>
+    <div class="status">{{ kp_name }} · 系统建议：{{ mastery_label }}</div>
+    <div class="chart-wrap"><canvas id="profileRadar"></canvas></div>
+  </section>
+
+  <section class="card">
+    <h2>错因分析</h2>
+    <div class="status">本次共错 {{ wrong }} 题</div>
+    <div class="chart-wrap"><canvas id="errorRadar"></canvas></div>
+    {% if wrong == 0 %}
+    <div class="no-errors">本次没有错题，未发现集中错因。</div>
+    {% elif unattributed_count == wrong %}
+    <div class="status warn">错因尚待老师确认，本次不生成自动错因结论。</div>
+    {% else %}
+    <ul class="facts">
+      {% for label, count in error_counts.items() %}
+      <li><span>{{ label }}</span><b>{{ count }} 题</b></li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+</div>
+
+<div class="actions">
+  <a class="btn primary" href="/">再开一场</a>
+  <a class="btn secondary" href="{{ detail_url }}">查看本次答题明细</a>
+</div>
+
+<script>
+function drawRadar(canvasId, labels, values, color, fillColor) {
+  const canvas = document.getElementById(canvasId);
+  const wrap = canvas.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  const width = wrap.clientWidth;
+  const height = wrap.clientHeight;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+
+  const cx = width / 2;
+  const cy = height / 2 + 8;
+  const radius = Math.min(width, height) * 0.31;
+  const count = labels.length;
+  const angleStep = (Math.PI * 2) / count;
+  const start = -Math.PI / 2;
+
+  ctx.clearRect(0, 0, width, height);
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "#dfe3e7";
+  for (let ring = 1; ring <= 4; ring++) {
+    ctx.beginPath();
+    for (let i = 0; i <= count; i++) {
+      const angle = start + i * angleStep;
+      const r = radius * ring / 4;
+      const x = cx + Math.cos(angle) * r;
+      const y = cy + Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "#c8cdd3";
+  for (let i = 0; i < count; i++) {
+    const angle = start + i * angleStep;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+    ctx.stroke();
+  }
+
+  ctx.beginPath();
+  values.forEach((value, i) => {
+    const angle = start + i * angleStep;
+    const r = radius * Math.max(0, Math.min(1, value));
+    const x = cx + Math.cos(angle) * r;
+    const y = cy + Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.closePath();
+  ctx.fillStyle = fillColor;
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  values.forEach((value, i) => {
+    const angle = start + i * angleStep;
+    const r = radius * Math.max(0, Math.min(1, value));
+    ctx.beginPath();
+    ctx.arc(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+  });
+
+  ctx.font = "13px sans-serif";
+  ctx.fillStyle = "#3b4249";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  labels.forEach((label, i) => {
+    const angle = start + i * angleStep;
+    const x = cx + Math.cos(angle) * (radius + 32);
+    const y = cy + Math.sin(angle) * (radius + 25);
+    ctx.fillText(label, x, y);
+  });
+}
+
+drawRadar(
+  "profileRadar",
+  ["掌握程度", "本次正确率", "步骤正确率", "证据充分度"],
+  {{ profile_values | tojson }},
+  "#1a5fb4",
+  "rgba(26,95,180,.20)"
+);
+drawRadar(
+  "errorRadar",
+  ["审题", "概念", "计算", "跳步", "粗心"],
+  {{ error_values | tojson }},
+  "#b3261e",
+  "rgba(179,38,30,.18)"
+);
+let resizeTimer = null;
+window.addEventListener("resize", function () {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(function () { location.reload(); }, 250);
+});
+</script>
+</body>
+</html>

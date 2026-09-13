@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+{% if waiting %}<meta http-equiv="refresh" content="3">{% endif %}
+<title>H1 组卷预审</title>
+<style>
+body{font-family:sans-serif;max-width:1080px;margin:0 auto;padding:16px;background:#f5f6f8;color:#222}
+h1{font-size:20px}.meta{color:#888;font-size:13px}
+.layout{display:flex;gap:16px;align-items:flex-start}
+main{flex:1;min-width:0}
+.side{width:280px;flex:0 0 280px;position:sticky;top:16px}
+.card{background:#fff;border:1px solid #e3e5e8;border-radius:8px;padding:14px 16px;margin:12px 0}
+.card-head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.idx{font-weight:bold}.badge{font-size:12px;padding:2px 8px;border-radius:10px;color:#fff}
+.badge-simple{background:#0a7d28}.badge-mid{background:#c77d0a}.badge-hard{background:#b3261e}
+.stem{margin:6px 0}
+form.inline{display:inline;margin:0}
+button{font-size:14px;padding:5px 10px;cursor:pointer;border-radius:4px;border:1px solid #c9ccd1;background:#fff}
+button:hover{background:#eef0f3}
+.panel{background:#fff;border:1px solid #e3e5e8;border-radius:8px;padding:12px 14px;margin-bottom:12px}
+.rrow{margin:10px 0}.rrow label{display:block;font-size:14px;margin-bottom:3px}
+.rrow input[type=range]{width:100%}
+button.ratio{background:#1a5fb4;color:#fff;border:0;width:100%;padding:8px;font-size:15px}
+button.primary{background:#1a5fb4;color:#fff;border:0;width:100%;padding:10px;font-size:16px;font-weight:bold}
+.warn{background:#fff3cd;border:1px solid #c77d0a;border-radius:6px;padding:10px;margin:12px 0}
+@media (max-width:820px){.layout{display:block}.side{width:auto;position:static}}
+</style>
+</head>
+<body>
+<h1>组卷预审 <span class="meta">（老师：确认题目后学生开做）</span></h1>
+{% if waiting %}
+<div class="card"><b>AI 正在按你的要求生成新题…（约 10~30 秒）</b><br>
+<span class="meta">本页每 3 秒自动刷新，生成完成后会自动显示新题目。</span></div>
+</body>
+</html>
+{% else %}
+{% if busy %}<div class="warn">上一个操作还在生成中，请等它完成再操作。</div>{% endif %}
+{% if error_message %}<div class="warn">{{ error_message }}</div>{% endif %}
+<div class="layout">
+  <main>
+  {% for c in candidates %}
+  <div class="card">
+    <div class="card-head">
+      <span class="badge badge-{{ c.difficulty }}">{{ {'simple':'简单','mid':'中档','hard':'难'}[c.difficulty] }}</span>
+      <span class="idx">第 {{ c.index }} 题</span>
+      <form class="inline" method="post" action="/teacher/review/swap">
+        <input type="hidden" name="no" value="{{ c.index }}">
+        <button type="submit">换一题</button>
+      </form>
+    </div>
+    <p class="stem">{{ c.stem }}</p>
+    <p class="meta">
+      程序答案：{{ c.answer }}
+      {% if c.params.semantic_validation and c.params.semantic_validation.status == 'verified' %}
+      · 题干校验：已通过
+      {% endif %}
+    </p>
+    <form method="post" action="/teacher/review/edit">
+      <input type="hidden" name="no" value="{{ c.index }}">
+      <textarea name="stem" rows="3" style="width:100%;box-sizing:border-box;margin:6px 0">{{ c.stem }}</textarea>
+      <div class="meta" style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0">
+        <label>a <input type="number" step="any" name="a" value="{{ c.params.a }}" required style="width:70px"></label>
+        <label>b <input type="number" step="any" name="b" value="{{ c.params.b }}" required style="width:80px"></label>
+        <label>c <input type="number" step="any" name="c" value="{{ c.params.c }}" required style="width:80px"></label>
+        <label>结构标记 <input type="text" name="structure_tag" value="{{ c.params.structure_tag or '' }}" style="width:110px"></label>
+      </div>
+      <button type="submit">保存并重新计算</button>
+    </form>
+  </div>
+  {% endfor %}
+  </main>
+  <aside class="side">
+    <div class="panel">
+      <div class="idx">难度比例</div>
+      <form method="post" action="/teacher/review/regroup-ratios">
+        <div class="rrow">
+          <label>简单 <output id="v-simple">{{ simple_ratio }}</output>%</label>
+          <input type="range" id="r-simple" name="simple_r" min="0" max="100" step="5" value="{{ simple_ratio }}">
+        </div>
+        <div class="rrow">
+          <label>中档 <output id="v-mid">{{ mid_ratio }}</output>%</label>
+          <input type="range" id="r-mid" name="mid_r" min="0" max="100" step="5" value="{{ mid_ratio }}">
+        </div>
+        <div class="rrow">
+          <label>难 <output id="v-hard">{{ hard_ratio }}</output>%（自动补余）</label>
+          <input type="range" id="r-hard" min="0" max="100" step="5" value="{{ hard_ratio }}" disabled>
+        </div>
+        <button class="ratio" type="submit">按此比例重组</button>
+      </form>
+      <p class="meta">三项和恒为 100%：拖动前两项，难题档自动补足余量。</p>
+    </div>
+    <div class="panel">
+      <form method="post" action="/teacher/review">
+        <button class="primary" type="submit" name="decision" value="approve">✓ 全部通过，定稿开做</button>
+      </form>
+    </div>
+  </aside>
+</div>
+{% endif %}
+<script>
+document.querySelectorAll("form").forEach(function (f) {
+  f.addEventListener("submit", function () {
+    var msgs = {
+      "/teacher/review/edit": "保存题干中…",
+      "/teacher/review/swap": "换题中…",
+      "/teacher/review/regroup-ratios": "重组中…（若需 AI 生成约 10~30 秒）",
+      "/teacher/review": "定稿中…"
+    };
+    var msg = msgs[f.getAttribute("action")] || "处理中…";
+    // 立即禁用会把按钮 name/value 从提交序列化中剥掉（decision 变空串），
+    // 必须等表单序列化完成后再禁用
+    setTimeout(function () {
+      f.querySelectorAll("button").forEach(function (b) {
+        b.disabled = true;
+        b.textContent = msg;
+      });
+    }, 0);
+  });
+});
+var rs = document.getElementById("r-simple");
+var rm = document.getElementById("r-mid");
+var rh = document.getElementById("r-hard");
+if (rs && rm && rh) {
+  function syncRatios() {
+    var s = parseInt(rs.value, 10), m = parseInt(rm.value, 10);
+    if (s + m > 100) { m = 100 - s; rm.value = m; }
+    var h = 100 - s - m;
+    rh.value = h;
+    document.getElementById("v-simple").textContent = s;
+    document.getElementById("v-mid").textContent = m;
+    document.getElementById("v-hard").textContent = h;
+  }
+  syncRatios();
+  rs.addEventListener("input", syncRatios);
+  rm.addEventListener("input", syncRatios);
+}
+</script>
+</body>
+</html>

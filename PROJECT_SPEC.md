@@ -235,6 +235,11 @@
 
 **V3 拍照 OCR**：纸笔作答拍照 → OCR 转 LaTeX（GLM-OCR/PaddleOCR-VL API）→ 作答模板结构校验纠错。**不自建 OCR**（数据/训练/迭代维护成本极高，2026-08-31 调研）；避开腾讯云公式识别（2026-09-30 下线）。
 
+**V3 识别可靠性设计（2026-09-09 补）**：
+- **识别回显确认**：OCR 识别结果先回显（"系统识别你的作答为：…，对吗？"），学生确认后才进入程序判定；置信度低降级回手填——防"识别错导致误判"，对齐"AI 初评/老师终审"两分法（识别归 AI，判定归程序，红线不变）
+- **VLM 选项入册**：DeepSeek 2026-08 上线 `deepseek-v4-flash-vision-exp`（图文混合输入，图片成本约 0.001 元/张级，兼容 Chat Completions），与 GLM-OCR / PaddleOCR-VL 并列为 V3 识别供给方候选，选型到 P3 触发时实测对比
+- **字段预留**：`StudentStep` 届时新增 `result_source`（typed / photo_ocr / photo_vlm）与 `ocr_confidence`，供识别质量审计与画像证据分级（识别来路的作答证据降权处理）
+
 ---
 
 ## 7. 出题模块（题库来源 + 质量保障）
@@ -258,6 +263,25 @@
 2. **答案由程序按公式直接算出**（不让 AI 算答案，关掉"AI 算错答案"最大风险）。
 3. **规则校验**约束数字合法性（如 `b²-4ac≥0`、几何图形存在性、答案唯一）。
 4. **作答模板绑定（2026-08-31 定）**：每个出题模板同时定义**作答模板**（步骤骨架）——出题/作答/判分**共享同一结构**：出题模板生成题面，作答模板收学生填空（V1 模板填空），程序**逐空比对标准答案**判对错 + 精确定位断点（哪一步哪个数填错）。出题、作答、判定锁在同一模具里。
+
+### V2 配方整洁性与题目设计闸门（2026-09-11 定）
+
+- 当前作答模板固定走配方法，题目参数除了“整数系数 + 判别式完全平方”，还必须
+  满足 `b/a` 为偶数、`c/a` 为整数；否则会生成 6.25、3.0625 等不常见中间值。
+- 组卷缺库槽位由 `app/domain/question_design.py` 按题型结构生成：直接求解、连续偶数、
+  长方形面积、根与系数、多步化简。情境中的数量关系必须能推出对应参数，禁止
+  “随机方程 + 无关生活描述”。
+- **题干语义契约（2026-09-13 定）**：每种 `design_id` 声明可提取的题干事实，
+  由程序从自然语言题干提取后与 `a/b/c` 对比。直接求解与多步化简校验方程系数，
+  长方形面积校验长宽关系与面积，连续偶数校验乘积，根与系数校验和、积及二次项
+  系数。校验不一致时拒绝进入 H1 题池，并返回预审页保留当前会话；无契约的题型
+  不得伪装成已验证题。AI 不参与对错判定，只能作为后续复杂题型的候选事实提取器。
+- 作答模板必须跟随题目结构分流：面积题先表示长、再明确列方程、连续偶数题先表示相邻数、
+  根与系数题先用韦达关系、多步化简题先找公因数；不能把所有题都套成
+  “第一步除以 a”的配方法模板。
+- 旧的无设计 AI 题没有 `design_id`，不再进入组卷池；公开种子题重新按质量闸门
+  整理为 9 题。
+- 设计题池按二次项系数轮转抽取，避免同一难度前半段集中使用 `a=2`。
 
 ### 三道兜底防线
 | 兜底层 | 做什么 | 挡掉什么 |
@@ -464,19 +488,14 @@ little-tutor/
 │   │   └── images/          # 公开题目图片
 │   └── knowledge_base/      # 知识点卡片（进 RAG 向量库）
 ├── app/
-│   ├── prompts/                 # Prompt 版本管理（不内联代码，git 管版本）
-│   │   ├── grader_v1.md
-│   │   ├── question_gen_v1.md
-│   │   └── ...
-│   ├── state.py             # LangGraph State/TypedDict
-│   ├── agents.py            # QuestionGenerator / Grader / 画像更新
-│   ├── grader.py            # 三把尺子归因 + 复演定位断点
-│   ├── profiles.py          # 三层画像读写
-│   ├── db.py                # SQLite 连接与建表（4 张行为表）
-│   ├── auth.py              # JWT 认证（登录/签发/验证，P3 实现）
-│   ├── kb.py                # RAG 知识库（Chroma）检索
-│   ├── question_store.py    # 题库文件读写（JSON + 图片路径）
-│   └── main.py              # FastAPI 入口（学生答题页 + 老师看板）
+│   ├── domain/              # 判分、题型、模板、会话、证据、领域模型
+│   ├── harness/             # LangGraph State、会话图、兼容旧图
+│   ├── application/         # 学生练习、老师审核、画像证据
+│   ├── adapters/            # LLM、Prompt、SQLite、checkpoint、题库、会话存储
+│   ├── web/                 # 学生路由、老师路由、视图模型
+│   ├── templates/           # Jinja2 页面模板
+│   ├── cli.py               # 会话制 CLI 入口
+│   └── runtime.py           # 运行路径与测试隔离
 ├── frontend/                # Vue SPA（学生答题页+老师看板，P3 服务化时建）
 └── tests/
 ```
@@ -504,6 +523,13 @@ little-tutor/
 - **高中计算型（V2 求解器扩展）**：导数题（求导/极值/恒成立/分类讨论）+ 解析几何 + 数列 + 三角 + 立体向量——SymPy 全可算，程序回代验证。**导数恒成立/不等式 → 构造辅助函数求最值程序判定**；分类讨论 → 程序枚举参数区间逐类验
 
 ### V3（扩展到物理/化学）
+- **学科插件方针（2026-09-12 定）**：学科能力分为三类插件，避免形成学科 `if/else`
+  或单一“综合大插件”。`SubjectPlugin` 负责单学科题面解析、答案 schema、
+  单位/符号规则、求解器、判分器和证据分级；`TrainingPlugin` 负责一次训练的
+  知识点、学科配比、难度、题型、提示策略和报告维度；`IntegratedPlugin`
+  负责真正跨学科的求解链，例如物理描述 + 数学方程求解 + 物理单位校验。
+  会话生命周期、checkpoint、持久化、证据链、掌握度、HITL、权限和测试隔离
+  始终属于共享核心，不允许学科插件重写。
 - **物理/化学计算题结构化建模（2026-09-04 定）**：物理符号（`P`、`W`、`U`、`I` 等）不能简单扩大数学变量正则范围，需引入独立的结构化作答 schema、单位建模与符号计算（如单位库 + SymPy）。自由文本/语义理解只作为兜底，主判分路径仍保持程序可验证；AI 只做归因与证据补充，结论由程序和老师确认。
 - **物理/化学真题验证出的架构缺口（2026-09-04 定）**：用初高中物理/化学实验题与计算压轴题验证后，V3 需补齐以下能力，缺一判分管线在真实题上走不通：
   1. **图的双 role**：图既能承载数值/拓扑（电路刻度、光具座读数），也能只做场景展示。schema 必须区分，不能把所有图都当数据源。
@@ -695,6 +721,20 @@ V1 核心端点（约 6-8 个），写码前锁定，避免前后端各写一套
 
 **首次入口**：老师注册后引导创建第一个学生档案（姓名 + 年级 + 目标），然后进入该学生的第一次摸底。V1 不做花哨 onboarding，但流程路径必须定：登录 → 学生列表（空）→ "创建学生" → 摸底。
 
+**身份与会话分层（2026-09-12 补）**：
+- `student_id` = 长期身份，学生的掌握度、错因记录和跨会话记忆都挂在它下面；
+- `session_id` = 一次练习，只负责把一次组卷/作答/确认记录归组；
+- `thread_id` = LangGraph checkpoint 的内部续跑键，不是用户输入项。
+- 每次“开始/再开一场”都创建新会话；同一学生可跨会话累计画像。当前 Web 演示
+  版用 HttpOnly cookie 保存 `student_id` 与当前 `thread_id`，正式 P3 改成老师
+  登录 + 学生选择/绑定，不要求用户填写任何会话 ID。
+
+**运行数据隔离（2026-09-12 补）**：
+- 默认运行库为 `tutor.db` / `checkpoints.db`，仅存真实用户流程数据；
+- 手动冒烟和评测程序必须通过 `TUTOR_DB_PATH` / `TUTOR_CHECKPOINT_PATH` 指向
+  临时目录，退出后删除，不得写回生产库；
+- 自动化测试一律使用临时 SQLite + 注入 checkpointer。
+
 **学生答题页线框**：看题 → 填依据（点选）→ 填结果（文本框）→ 提交 → 下题 → 做完 → "等老师批改"。V1 拿笔画线框图即可，不求好看，求流程通。
 
 **多学生管理**：老师看板需有学生列表（下拉框或侧栏），能切换学生、看每个学生当前进度。V1 最小实现 = 一个下拉框。
@@ -822,6 +862,10 @@ Docker 重启时正在执行的 Grader 调用会被中断。FastAPI lifespan han
 
 ## 14. 已拍板清单
 
+> **口径说明（2026-09-09 补）**：本清单 ✅ = 设计已拍板，**不等于已实现**。
+> 实现进度看 §15 差异记账与各条目的完成日期标注；带触发条件的降级项
+> （备份/PIPL/互斥/刷新恢复/migrations/异步化等）按 §13.9 触发点执行。
+
 - ✅ 定位：面向**独立私教/个体家教老师**的一对一自适应闭环，HITL，政策合规（2026-08-31 调研更新）
 - ✅ 铁律：AI 只做可量化、因果唯一的事；AI 报事实，人做判断
 - ✅ 架构：双环自适应（内环练 / 外环测评交叉验证）
@@ -889,74 +933,184 @@ Docker 重启时正在执行的 Grader 调用会被中断。FastAPI lifespan han
 - **数据层（⑧，已定）= 持久化 SQL 表**：student/answer_record/mastery/teacher_decision
 - **LangGraph 状态（⑨，已定稿）= 图运行时内存 State**：一轮图运行的临时流转，与 SQL 表关联但不同层
 
-### 实现现状（2026-09-05 更新）
-- v0.1 MVP 已提交：双 Agent（出题/批改）+ HITL 闭环端到端可跑（CLI），P1-L1~L6 完成
-- 42 项离线测试全绿（unittest 实跑 6.1s）：判分、HITL 分流守护（暂停不写/reject 不写/
+### 实现现状（2026-09-07 更新）
+- v0.1.1 MVP 已提交：双 Agent（出题/批改）+ HITL 闭环端到端可跑（CLI），P1-L1~L6 完成
+- 65 项离线测试全绿（unittest 实跑 3.7s）：判分、HITL 分流守护（暂停不写/reject 不写/
   accept 恰好一次）、落库行为、图路由；测试目录已工程化（课程练习文件更名
   `test_hitl_flow.py` 归位项目测试）；CI 门禁（GitHub Actions，push/PR 跑全量测试）+
   `get_llm` 实例缓存（lru_cache，节点不再重复建 LLM 客户端）；requirements 拆分
   （V1 核心依赖 + pytest，V2/V3 重依赖注释待启用）
 - 2026-09-02 修复：判分改数值集合比对（堵子串假阳性/假阴性）、mastery 读回接通自适应出题、
   审批输入校验（不再默认 accept）、profile_update 入口校验（缺 question 打扰老师前报错）
+- 2026-09-07：出题/批改 prompt 文件接线完成（`question_gen_v1.md` / `grader_v1.md`），
+  出题温度 0.7，归因温度 0
+- 2026-09-09：B2 难度参数化完成——难度参数约束表落地（simple：a=1 且整数根；
+  mid：2≤a≤5 且有理根；hard：2≤a≤7 且必须携带结构标记
+  建模/根与系数/多步化简），系数要求整数、判别式要求完全平方（保证有理根可手解），
+  参数越界带边界信息重试，hard 缺结构标记且 a 落在 mid 带内自动降级 mid；
+  出题 prompt 内容升 v2（难度带 + structure_tag 写入 LLM 说明书），
+  全量测试 49 → 65 项
+- 2026-09-09（续）：B3/B1/B4/种子题库完成——B3 `accuracy_by_difficulty`
+  聚合各难度正确率（零 schema 变更）；B1 `app/mastery.py` 按 §16.5 会话聚合
+  落地（strong 需最近两个会话 ≥0.8，mid ≥0.6，confidence=最近会话率，
+  进行中作答先并入当前会话聚合；实现按定稿口径，无需"连击字段"，
+  2026-09-07 路线速记作废）；B4 `run_mvp` 批改后当场打印程序初评；
+  种子题库 9 题 JSON 入册（`data/seed_questions.json` + `app/seeds.py`
+  幂等加载，答案程序算、入库前过难度带校验，知识点缺失自动建卡），
+  "出题优先挑库"随 C 阶段 H1 组卷预审实现；全量测试 65 → 81 项
+- 2026-09-09（续二）：P2 持久化第一步完成——新增 `app/checkpointing.py`
+  装配文件级 SqliteSaver（checkpoints.db，进程级懒加载单连接），
+  `build_tutor_graph` / `build_profile_graph` 开放 checkpointer 注入
+  （测试注入 InMemorySaver 保持隔离）；跨图实例 resume 测试验证
+  "图 A 暂停在 interrupt → 全新连接 + 全新图实例 B resume → 落库恰好一次"；
+  全量测试 81 → 82 项
+- 2026-09-09（续三）：A 模板填空完成——`app/template.py` 程序按配方法套路
+  生成作答模板（choice 依据点选 + expression 式子填空，共 6 空），
+  `judge_blanks` 逐空判定（数值/分数/容差/序号），第一错空即断点；
+  `generate_node` 挂模板，`grade_node` 合并 `blank_results` 与
+  `program_breakpoint`，对错仍按最终作答判定（根空位作答由 CLI 拼装）；
+  `run_mvp` 逐步作答；无 params 的旧题退化为最终作答模式；
+  全量测试 82 → 93 项
 
 ### 实现与设计的已知差异（如实记账，勿静默抹平）
-- db 实际 7 表：students/knowledge_points/questions/mastery/answer_records/profiles/teacher_decisions；
-  本节设计稿的 user/session_counter 两表未建（单学生 CLI 阶段不需要，多学生服务化时再补）
+- db 实际 8 表：students/knowledge_points/questions/mastery/answer_records/
+  practice_sessions/profiles/teacher_decisions；本节设计稿的 user/session_counter
+  两表未建（单学生 CLI 阶段不需要，多学生服务化时再补）
 - `session_id` V1 直接用 CLI 会话线程字符串；`S{YYYYMMDD}-{seq:03d}` 格式与原子计数器留到多学生会话时实现
+- 2026-09-12：新增 `practice_sessions` 业务会话生命周期表。掌握度只读取
+  `data_source=real + status=completed + review_status=accepted` 的会话；
+  未完成、中断、测试、拒绝会话只保留事实，不进入画像证据。已有真实会话
+  `web-51a030c4` 已按老师 accept 记录显式回填。首次作答、提示次数和受助
+  程度仍待后续接入。
+- 2026-09-12：完成全项目分层重构。当前代码结构为 `domain / harness /
+  application / adapters / web`，旧根目录实现模块已清理，CLI 入口为
+  `app.cli`；未决架构问题记录在 `ARCHITECTURE_QUESTIONS.md`。
+- 2026-09-13（真实使用审查修复）：题目答案、有效根和解析统一由
+  `params + design_id` 物化，旧题入池前自动重算并回写；种子和无扇出组卷
+  路径统一执行题干去重；AI 归因失败记录 `未归因`，不再伪造“计算错误”或
+  进入错因雷达；历史会话与当前会话统一使用 `evidence_weight`；
+  学生/老师入口分离为 `/` 与 `/teacher/*`，老师入口支持
+  `TUTOR_TEACHER_TOKEN` 共享令牌。
+- 2026-09-13（多 worker 收尾）：会话写并发由进程内锁改为
+  `practice_sessions` 数据库租约；组卷和候选题物化拆入
+  `app/harness/question_assembly.py`，`session_graph.py` 聚焦图编排与路由。
 - 出题目前每题实时 AI 生成（种子题库直采未接，V1 单 kp 影响有限）
-- LLM 参数生成两次失败仍裸抛异常（无全局兜底），InMemorySaver 重启即失——均留 P2
+- LLM 全局兜底缺失已于 2026-09-09 修复：批改归因异常降级为"仅程序证据"
+  （evidence_source=program，is_correct 程序事实不丢）；组卷/换题/重组异常
+  置 llm_error 走 failed 节点正常收束，CLI/Web 提示重试。
+  InMemorySaver 重启即失
+  问题已于 2026-09-09 修复——checkpointer 换文件级 SqliteSaver（checkpoints.db），
+  老师未批完的审批可凭 thread_id 跨进程续跑（含跨图实例 resume 测试）
 - 2026-09-03：`mastery.wrong_count` 更名 `confirmed_wrong_count`（原义"答错次数"与实际语义
   "被老师确认的答错次数"不符，reject 的建议不计）；`questions.source` 词汇统一为
   `public/private/ai_generated`
 - 2026-09-05（外部评审核实补账）：①§16.5 掌握度规则未实现——`propose_profile_change`
   一题一档（对→mid/错→weak）且 `apply_to_db` 直接覆盖 level，strong 无任何产生路径，
-  当前"自适应"是单题记忆（原漏记，为最大未记账差异）；②难度非受控变量——
+  当前"自适应"是单题记忆（原漏记，为最大未记账差异；已于 2026-09-09 按 §16.5
+  会话聚合规则修复——`app/mastery.py`，strong 需最近两个会话均 ≥0.8）；
+  ②难度非受控变量——
   `pick_difficulty` 结果仅作 prompt 形容词，(a,b,c) 无难度约束，难度→正确率无法归因；
   ③H1 组卷预审未实现，AI 题直接给学生（§7 底线被绕过），每题 interrupt 与
-  §16.1 决策#7"消灭高频打断"冲突；④Grader 无过程证据——CLI 只收最终答案，
+  §16.1 决策#7"消灭高频打断"冲突（③已于 2026-09-09 随 C 会话级图修复——
+  H1 组卷预审 + 单题循环零打断 + H3 批量确认，一次会话打断 ≤2 次）；
+  ④Grader 无过程证据——CLI 只收最终答案，
   模板填空未建，AI 归因在零过程证据下运行，靠程序仲裁 + 老师终审兜底不污染画像；
-  ⑤`get_llm` 单实例 temperature=0.7 出题/批改共享，归因需要 0（按任务配温度留 V2）
-  ；⑥prompt 文件债——`app/prompts/question_gen_v1.md` 已建但零引用（休眠文件），
-  出题 prompt 内联 `agents.py`，`grader_v1.md` 未建；prompt 文件化是 P6 评测
-  （换 prompt 版本对比归因准确率）的地基；⑦难度词汇表三套并存——
-  `state.py` `Question.difficulty` 声明为 `Level`（weak/mid/strong）与运行时
-  `simple/mid/hard` 不符，db 默认值"中等"，难度（题目属性）与掌握度（学生状态）
-  两个域共用类型埋混用坑
+  ⑤难度词汇表三套并存问题已在 2026-09-07 通过独立 `DifficultyLevel` 修复
+  ②难度非受控问题已在 2026-09-09 通过难度参数约束表修复（B2）
+  ④已于 2026-09-09 通过模板填空修复——逐空判定产生真实过程证据与断点定位
+  （`app/template.py`），AI 归因不再零证据运行
+- 2026-09-09（全面对照审计补账，防漏账）：
+  ⑥`profiles` 表零写入——三层画像仅内容层（mastery）实现，策略层吸收率/
+  心理层粗心率整块未做（§5/§16.5 仅有规则定稿），profiles JSON 恒为空；
+  ⑦`teacher_decision.target` 字段缺失（设计用于吸收率查询），随吸收率
+  实现时补；⑧题库文件层未建——`question_store.py` 与私有题库隔离不存在，
+  现状为 AI 原创种子题入 questions 表（无版权风险），私有题库/批量导题
+  触发时按 §10.3 补文件层；⑨schema 尾巴三件：`hint_given` 未按 §361
+  留位、`used_seconds` 建列未写入（死字段）、`images/dep_kp_ids`
+  TypedDict 有而 DB 表无——统一搭 C 会话级图落库链路定稿，不单独 migration
+- 2026-09-10（用户实测）：**难度差异目前只体现在系数与根的形态，结构未分层**——
+  全部题型共用同一套六空配方模板（化简/移项/配方/开方/两根），simple 与 hard
+  的作答结构完全相同，hard 的"结构标记"（建模/根与系数/多步化简）实际只是
+  题干文字前缀，未驱动模板差异；根因：①A 阶段定稿为单题型单模板；
+  ②9-09 修正假情境题时把结构标记退化为文字。**规划**：模板按结构标记分型
+  （建模题先填等量关系→列方程→求解；根与系数题先填两根和/积→再求根），
+  使难度在作答结构上可见——列为 A 的扩展项，V2 后段或 P3 初排期
 
-### 改进路线定案（2026-09-05，三根传动轴顺序 B→A→C）
+### 改进路线定案（2026-09-07 复核，三根传动轴顺序 B→A→C）
+0. **Prompt 债前置（2026-09-07 完成）**：
+   - 接线 `app/prompts/question_gen_v1.md`，补 `grader_v1.md`
+   - 按任务拆温度：出题可保留 0.7，归因建议 0
+   - 这一步先于 B0，因为难度参数化与归因评测都依赖 prompt 版本可追溯
 1. **B（先做，还债）**：
-   - **B0 词汇表统一**：新增 `DifficultyLevel = Literal["simple","mid","hard"]`
+   - **B0 词汇表统一（2026-09-07 完成）**：新增 `DifficultyLevel = Literal["simple","mid","hard"]`
      独立类型（与掌握度 Level 分域），`state.py` `Question.difficulty` 声明与
      运行时对齐，db 难度默认值改英文词
-   - **B2 难度参数化**：难度→参数约束表（草案：simple：a=1 且整数根；mid：a≠1
-     整数根；hard：分数根/更大系数——**设计停点：草案拍板后才写码**），
-     参数生成后程序校验难度约束（违约走既有重试机制）
-   - **B3 正确率归因**：`answer_records` JOIN `questions.difficulty` 即可算
-     （V1 题目基本不可变，零 schema 变更）；难度快照列降级为触发条件条目
-     （题目难度日后会被改时才需要）
-   - **B1 掌握度规则**：§16.5 落地（连击升级：连续两次答对才允许升一级，
-     错一次清零，mastery 加连击字段——create_all 只增不改，需重建库；
-     migration 选型到触发时定：手写 vs Alembic）
-   - **B4 学生即时反馈**：批改完直接打印程序判定的对错（程序事实，五行改动，
-     落地"AI 初评/老师终审"两分法）
-   - **种子题库入册**（§16.1 决策③）：B/A 期间顺手做（几道 JSON 种子题），
-     **C 开工前必须完成**——H1 组卷预审要有库可挑，否则预审对象永远是纯 AI 变式
-2. **A（第二，用户价值最大）**：模板填空作答（依据点选 + 式子填空、逐空判定）落地，
-   Grader 从"猜"变"定位断点"；这是 §9 答题链路设计的实现，也是 C 的前提
-3. **C（最后，结构重构）**：会话级图（§16.2 已有设计稿）——H1 组卷预审一次过 +
+   - **B2 难度参数化（2026-09-09 完成）**：难度→参数约束表定稿并落地
+     （外部调研学科网/组卷网难度系数带后拍板：simple 对应 0.8+，a=1 且整数根；
+     mid 对应 0.5-0.79，2≤a≤5 且有理根；hard 对应 0.3-0.49，2≤a≤7 且必须携带
+     结构标记 建模/根与系数/多步化简；stretch（<0.3）暂不进生成器），
+     `validate_difficulty_params` 程序校验（整数系数 + 判别式完全平方 + 难度带 +
+     结构标记），违约带边界信息重试；hard 缺结构标记且 a 落在 mid 带内
+     自动降级 mid；出题 prompt 内容升 v2
+   - **B3 正确率归因（2026-09-09 完成）**：`db.accuracy_by_difficulty`——
+     `answer_records` JOIN `questions.difficulty` 聚合各难度正确率，支持
+     kp/学生/会话过滤（V1 题目基本不可变，零 schema 变更）；难度快照列
+     降级为触发条件条目（题目难度日后会被改时才需要）
+   - **B1 掌握度规则（2026-09-09 完成）**：§16.5 按定稿口径落地——
+     `app/mastery.py` 按 `session_id` 聚合单次会话正确率（只认题目主 kp），
+     strong 需最近两个会话均 ≥0.8（防单次碰对），mid 需最近 ≥0.6，
+     confidence=最近会话率；进行中作答先并入当前会话聚合（保证会话首题
+     有"最近会话"）；`propose_profile_change` 接会话聚合，
+     `apply_to_db` 同步写 confidence/evidence。实现无需"连击字段"与重建库
+     （2026-09-07 路线速记按定稿口径修正）
+   - **B4 学生即时反馈（2026-09-09 完成）**：`run_mvp` 批改完直接打印程序
+     判定的对错（程序事实），落地"AI 初评/老师终审"两分法
+   - **种子题库入册（2026-09-09 完成，§16.1 决策③）**：
+     `data/seed_questions.json` 9 题（simple×3/mid×3/hard×3，AI 原创带
+     params 与结构标记），`app/seeds.py` 幂等加载——答案由程序按 params
+     计算，入库前按 B2 难度带校验，知识点缺失自动建卡；
+     "出题优先挑库"由会话级图（C）的 H1 组卷预审实现，库已就绪
+2. **A（2026-09-09 完成，用户价值最大）**：模板填空作答落地——
+   `app/template.py` 程序按配方法套路生成模板（choice 依据点选 + expression
+   式子填空，LLM 不参与模板），`judge_blanks` 程序逐空判定，第一错空即断点，
+   `grade_node` 合并 `blank_results` 与 `program_breakpoint` 程序证据；
+   schema 为稳定契约（blank kind 留扩展位），供给方可替换——固定套路题型
+   用 builder，多路径题走题库自带或 LLM 起草+程序校验（期望值必须程序可判）；
+   V2 单题型起步，开放表述语义判定留 V3；Grader 从"猜"变"定位断点"
+3. **C（2026-09-09 完成，结构重构）**：会话级图（§16.2 设计稿落地，`app/session_graph.py`）——
+   H1 组卷预审一次过 +
    会话级 H3 批量确认，消灭每题打断；验收标准 = 一次会话打断老师 ≤2 次 +
    黄金演示脚本 3 分钟讲清"越练越准"（摸底会话 → 第二次会话出题侧重可见变化 →
    正确率趋势）
+   - **实施注记（2026-09-09 审计后定）**：节点序列按 §16.2 全口径——
+     `read_profile → generate_question_set（按掌握度混难度 + 挑库优先）→
+     H1(interrupt①) → 单题循环×N（零打断）→ summarize_profile →
+     H3(interrupt②) → write_back`；求助机制随 P3 不进本图（§361 已定）；
+     题量默认 10、可配置（定稿口径 10-20，演示可输小数字）；
+     **schema 尾巴随本图落库链路定稿**——`hint_given` 留位、`used_seconds`
+     接入或删除、questions 表补 `images/dep_kp_ids` 列（或显式降级记账）
+4. **简易 Web（演示版，2026-09-09 完成，V2 收尾）**：FastAPI + Jinja2 三页面
+   （出题/答题页 = 模板填空表单，答题中不显结果；全部完成后统一题级汇总；
+   单题完整结果页保留程序初评 + 断点高亮 + AI 归因、老师审批页），单学生、
+   无登录、无样式精修；graph/SqliteSaver/thread_id
+   全复用，Web 仅把 run_mvp 的 CLI 交互换成表单提交。**排 C 之后**——
+   Web 页面流跟着会话流程走，先 Web 后 C 等于页面做两遍。
+   完整产品化（多学生/登录/家长简报/移动端/部署）仍属 P3，边界不动
 - 家长会话简报（对几题/错因分布/老师结论）：V2 定简报字段与数据结构
   （会话正确率/错因分布/与上次对比/老师结论位，现有 7 表大概率可聚合免新表），
   P3 随 Web 实现（Web 有了才发得出去）
 
 ### 下一步建议
-1. P2 先还债：B（掌握度规则 + 难度参数化）→ A（模板填空）→ C（会话级图），
-   顺序见上"改进路线定案"
-2. P2 并行：SqliteSaver 持久化 checkpoint / Send 并发 / 子图 / LLM 全局异常兜底
-3. 多学生服务化前补 user/session_counter 表 + session_id 原子生成
-4. 手撕代码练习路线（见记忆笔记）：profile_update → graph → agents → state → db/run_mvp
+1. V2 执行顺序：Prompt 前置 → B0 词汇表统一 → B2 难度参数化 → B3 正确率归因 →
+   B1 掌握度规则 → B4 学生即时反馈 → 种子题库 → A 模板填空（均已完成，
+   2026-09-09；P2 持久化第一步 SqliteSaver、C 会话级图、简易 Web 演示版、
+   P2 Send 扇出/批改子图/LLM 兜底均已完成）→ **V2 全部落地（2026-09-09）**。
+   下一阶段：P3 Web 产品化 / 物理化学学科扩展 / 外环 exam 模式（批改扇出
+   随 exam 批量提交落地）。
+2. P2 并行：SqliteSaver 持久化 checkpoint（已完成 2026-09-09）/
+   Send 并发 / 子图 / LLM 全局异常兜底。
+3. 多学生服务化前补 user/session_counter 表 + session_id 原子生成。
+4. 手撕代码练习路线（见记忆笔记）：profile_update → graph → agents → state → db/run_mvp。
 
 ---
 
@@ -1030,12 +1184,23 @@ summarize_profile        整次会话汇总 → 题级画像批量 + 批级画�
             __end__         （反哺：下次会话 read_profile 读到新 mastery）
 ```
 
+> **实现注记（2026-09-09，C 落地）**：会话级图已实现（`app/session_graph.py`）。
+> H1 的 swap/regroup 用图循环（h1_review → regen 节点 → 回 h1_review）实现，
+> 每节点执行最多一次 interrupt，规避节点重放时 LLM 非确定性再生成的坑；
+> 单题循环内 `answer_record` 逐题落库（session_id 归组），summarize 直接读库
+> 聚合，不再注入 current_rate（防双计）；求助机制随 P3 不进图（§8.5 已定）；
+> CLI 会话制入口 `run_mvp`，题量默认 10 可配置。
+> P2 补充：缺库 AI 槽位 Send 扇出并发生成（plan_id 轮次版本号隔离重组后的
+> 旧产物）；单题批改管线编译为子图挂入主图；LLM 异常全兜底
+> （归因降级为仅程序证据，组卷失败 llm_error 收束）。
+
 ### 16.3 State / TypedDict
 
 ```python
 from typing import TypedDict, Literal, Optional, List
 
 Level     = Literal["weak", "mid", "strong"]
+DifficultyLevel = Literal["simple", "mid", "hard"]   # B0：题目难度与掌握度分域（2026-09-09 同步实现契约）
 ErrorType = Literal["审题", "概念", "计算", "跳步", "粗心", "无错"]
 
 # ---------- 数据模型（落库/题库文件）----------
@@ -1049,7 +1214,7 @@ class Question(TypedDict):         # 题库 JSON 一条 / 出题产出
     id: str
     kp_id: str                     # 主知识点（聚合掌握度只认它，一对一）
     dep_kp_ids: List[str]          # 依赖/前置知识点（综合题才填，只记录不聚合）
-    difficulty: Level
+    difficulty: DifficultyLevel
     stem: str                      # 题干
     answer: str                    # 答案（程序算，不让AI算）
     analysis: str                  # 解析
@@ -1059,6 +1224,25 @@ class Question(TypedDict):         # 题库 JSON 一条 / 出题产出
 class StudentStep(TypedDict):      # 学生分步作答的一步
     basis: str                     # 依据（定理/公式/条件）→ 判概念/审题
     result: str                    # 结果（数值/文字）→ 判计算
+
+class Blank(TypedDict):            # 模板空位（A 定稿：schema 稳定契约，供给方可替换）
+    id: str
+    kind: Literal["choice", "expression"]  # 扩展位：V3 可加新类型，判定层配套扩展
+    basis: str                     # 步骤描述
+    options: Optional[List[str]]   # choice 专用
+    answer_index: Optional[int]    # choice 正确序号（0 基）
+    expected: Optional[float]      # expression 期望数值（程序判定）
+
+class QuestionTemplate(TypedDict): # 程序按题型套路生成（app/domain/answer_template.py），LLM 不参与
+    blanks: List[Blank]
+    answer_blank_ids: List[str]     # 哪些空位组成最终答案（应用题可能只有一个有效根）
+
+class BlankResult(TypedDict):      # 单空判定结果（程序事实，断点定位用）
+    blank_id: str
+    basis: str
+    kind: Literal["choice", "expression"]
+    student_result: str
+    is_correct: bool
 
 class ErrorAnalysis(TypedDict):    # 题级错因
     error_type: ErrorType
@@ -1070,12 +1254,14 @@ class ErrorAnalysis(TypedDict):    # 题级错因
     teacher_reviewed: bool         # 老师已逐个复核（H3后落库前必须=true，见 8.3）
     steps_analyzed: int            # 实际分析的学生步骤数（防幻觉，见 13.5）
     insufficient_evidence: bool    # 步骤不足以定位断点时=true（见 13.5）
+    program_breakpoint: Optional[str]  # 模板逐空判定出的程序断点（A，2026-09-09）
 
 class QuestionResult(TypedDict):   # 题级画像
     question_id: str
     is_correct: bool
     error: ErrorAnalysis
     steps: List[StudentStep]
+    blank_results: Optional[List[BlankResult]]  # 模板逐空判定（A，2026-09-09）
 
 class RecheckResult(TypedDict):    # 老师改题后 AI 重解的输出
     answer: str
@@ -1085,10 +1271,13 @@ class RecheckResult(TypedDict):    # 老师改题后 AI 重解的输出
 # ---------- LangGraph 运行时 State（单题一轮，图运行完销毁）----------
 class TutorState(TypedDict):
     student_id: str
+    session_id: Optional[str]      # CLI 会话线程字符串（S{日期}-{序数} 格式留多学生时实现）
     kp_id: str
+    kp_name: Optional[str]
     profile_snapshot: Mastery      # 本轮从库读到的画像
 
     question: Question
+    template: Optional[QuestionTemplate]   # 模板填空（A）；无 params 旧题为 None
     question_status: Literal["pending_teacher", "approved", "rejected", "edited"]
     teacher_instruction: Optional[str]     # H1意见（A：修改意图 / reject：换题指示）
     teacher_edited_stem: Optional[str]     # 老师手改题干（B）

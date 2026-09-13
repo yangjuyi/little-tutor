@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>第 {{ idx + 1 }} 题程序反馈</title>
+<style>
+body{font-family:sans-serif;max-width:760px;margin:0 auto;padding:20px 16px;background:#f5f6f8;color:#222}
+.card{background:#fff;border:1px solid #dfe3e7;border-radius:8px;padding:18px;margin:14px 0}
+.ok{color:#0a7d28;font-weight:bold}.bad{color:#b3261e;font-weight:bold}
+.status{font-size:22px;margin:8px 0 12px}
+.stem{color:#555;line-height:1.6}
+.breakpoint{background:#fff3cd;border-left:5px solid #c77d0a;padding:12px;margin-top:14px;line-height:1.5}
+.note{color:#66707a;font-size:14px;line-height:1.5}
+.btn{display:inline-block;background:#1a5fb4;color:#fff;text-decoration:none;border-radius:6px;padding:11px 16px;font-size:16px;font-weight:bold}
+</style>
+</head>
+<body>
+<p class="note">第 {{ idx + 1 }} / {{ total }} 题</p>
+<div class="card">
+  {% if is_correct %}
+  <div class="status ok">程序判分：正确</div>
+  {% else %}
+  <div class="status bad">程序判分：错误</div>
+  {% endif %}
+  <div class="stem">{{ stem }}</div>
+  {% if breakpoint %}
+  <div class="breakpoint">{{ breakpoint }}</div>
+  {% endif %}
+  <p class="note">以上是程序能够确定的事实。错因归因和画像更新会在本次练习结束后由老师确认。</p>
+</div>
+{% if finished %}
+<a class="btn" href="/answer/{{ total }}">查看本次作答汇总</a>
+{% else %}
+<a class="btn" href="/answer/{{ next_idx }}">继续下一题</a>
+{% endif %}
+</body>
+</html>
