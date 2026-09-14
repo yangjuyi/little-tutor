@@ -68,6 +68,68 @@ web -> application -> domain
 7. 组卷与候选物化已拆入 `harness/question_assembly.py`。
 8. 会话写并发由数据库租约控制，不再依赖单进程内存锁。
 
+## 过程诊断契约（2026-09-14 定）
+
+当前 `StudentStep = basis + result` 和 `answer_template` 的逐空判定只能定位
+“哪个空填错”，不能定位“哪一次步骤转换不成立”。后续过程诊断以步骤转换，
+而不是空位填写，作为最小判定单位。
+
+目标契约：
+
+```text
+StudentStepV2
+  step_no
+  raw_latex
+  operation
+  source
+  confidence
+
+TransitionCheck
+  from_step
+  to_step
+  is_valid
+  rule
+  error_type
+  evidence
+  confidence
+
+Submission
+  mode              # final_answer_only / step_by_step
+  steps
+  final_answer
+```
+
+诊断规则：
+
+1. `final_answer_only` 只判定最终答案事实。
+2. `step_by_step` 同时检查每次相邻步骤转换；首次不成立的转换成为程序断点。
+3. 步骤缺失时只能返回“证据不足/无法判断”，不能补造学生没写出的过程。
+4. 过程反馈、最终判定和画像证据分别记录；错误转换不能通过覆盖
+   `is_correct` 的方式偷写画像。
+5. 一元二次方程作为首个垂直切片，后续题型按题型注册转换校验器。
+
+## 重构映射
+
+| 当前文件/职责 | 当前问题 | 目标职责 | 迁移方式 |
+|---|---|---|---|
+| `domain/models.py::StudentStep` | 只有 `basis/result` | 保留旧契约并新增 `StudentStepV2`、`TransitionCheck`、`Submission` | 先并存，不破坏旧调用 |
+| `domain/answer_template.py` | 同时生成模板和执行判定 | 降级为 legacy 输入适配器 | 新过程诊断稳定后再迁入 legacy |
+| `application/student_practice.py::_build_student_steps` | 表单空位直接拼学生步骤 | 输入适配器 + 应用服务 | 拆成 `final_answer_only` 和 `step_by_step` 两条组装路径 |
+| `harness/session_graph.py::_grade_compute_node` | 只调用 `judge_blanks` | 调用过程诊断并合并最终判定 | 先旁路接入，旧路径保留为回退 |
+| 新增 `domain/process_diagnosis.py` | 不存在 | 相邻步骤转换校验、首个断点和证据 | 一元二次方程先落地 |
+| `domain/grading.py` | 只负责答案事实 | 继续作为程序真值源 | 不把过程策略塞回这里 |
+| `templates/answer.html` | 固定空位表单 | 后续改为步骤卡片输入 | 前端最后动，后端契约先行 |
+| `harness/legacy_graph.py` | 旧串图调试路径 | 确认无引用后退役 | 等新路径全绿再删 |
+
+迁移顺序固定为：
+
+1. 新增契约和 `process_diagnosis.py`，只加测试，不接业务。
+2. 在应用层新增 `diagnose_submission`，同时返回最终判定和转换检查。
+3. `session_graph` 旁路接入新诊断，旧 `judge_blanks` 保留为兼容回退。
+4. `student_practice` 支持两种 Submission 模式，模板仅作为一种输入适配器。
+5. 前端改步骤卡片，不引入画布；拍照输入仍后置。
+6. 全量测试、accept/reject、correct/wrong 端到端全部通过后，再退役旧模板主路径。
+
 ## 学科与训练插件
 
 V3 起新增学科能力时，不把物理、化学规则塞进数学实现，也不建立一个包办一切的
@@ -110,9 +172,10 @@ app/domain/plugins/
 
 ## 后续工作
 
-1. 接入首次作答、提示次数和受助程度。
-2. 让老师审核支持修正等级、错因和测试标记。
-3. 将会话状态、证据等级和掌握度置信度继续规则化。
-4. 评估旧串图 `harness/legacy_graph.py` 是否退役。
+1. 落过程诊断契约和一元二次方程转换校验器。
+2. 接入首次作答、提示次数和受助程度。
+3. 让老师审核支持修正等级、错因和测试标记。
+4. 将会话状态、证据等级和掌握度置信度继续规则化。
+5. 评估旧串图 `harness/legacy_graph.py` 是否退役。
 
 未决设计问题记录在 `ARCHITECTURE_QUESTIONS.md`。
