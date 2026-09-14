@@ -105,7 +105,7 @@ class TestWebFlow(unittest.TestCase):
             "steps": [],
         }
 
-    def _full_flow(self, decision="accept", level=None):
+    def _full_flow(self, decision="accept", level=None, extra=None):
         resp = self.client.post("/start", data={"count": "2"}, follow_redirects=False)
         self.assertEqual(resp.status_code, 303)
         resp = self.client.get("/teacher/review")
@@ -149,9 +149,13 @@ class TestWebFlow(unittest.TestCase):
         self.assertIn("确认并更新学生画像", summary.text)
         self.assertIn("题级归因证据", summary.text)
         self.assertIn("AI 归因", summary.text)
+        self.assertIn('name="error_0"', summary.text)
+        self.assertIn('name="test_session"', summary.text)
         summary_data = {"decision": decision}
         if level:
             summary_data[f"level_{self.kp_id}"] = level
+        if extra:
+            summary_data.update(extra)
         resp = self.client.post(
             "/teacher/summary",
             data=summary_data,
@@ -205,6 +209,37 @@ class TestWebFlow(unittest.TestCase):
             decision = s.query(db.TeacherDecision).one()
             self.assertEqual(decision.proposal["suggest_level"], "strong")
             self.assertTrue(decision.proposal["teacher_corrected"])
+
+    def test_teacher_can_correct_error_type_from_summary(self):
+        with patch.object(sg, "grade_question", return_value=self._fake_grade()):
+            self._full_flow("accept", extra={"error_0": "漏根"})
+        with self.session() as s:
+            answer = (
+                s.query(db.AnswerRecord)
+                .order_by(db.AnswerRecord.id)
+                .first()
+            )
+            self.assertEqual(answer.error_type, "漏根")
+            correction = (
+                s.query(db.TeacherDecision)
+                .filter_by(decision="edit")
+                .one()
+            )
+            self.assertEqual(
+                correction.proposal["error_type_after"], "漏根"
+            )
+
+    def test_full_flow_can_mark_test_session(self):
+        with patch.object(sg, "grade_question", return_value=self._fake_grade()):
+            done = self._full_flow(
+                "accept", extra={"test_session": "1"}
+            )
+        self.assertIn("测试会话", done.text)
+        with self.session() as s:
+            self.assertEqual(s.query(db.Mastery).count(), 0)
+            session = s.query(db.PracticeSessionRecord).one()
+            self.assertEqual(session.data_source, "test")
+            self.assertEqual(session.review_status, "accepted")
 
     def test_hint_is_recorded_and_resets_for_next_question(self):
         with patch.object(sg, "grade_question", return_value=self._fake_grade()):

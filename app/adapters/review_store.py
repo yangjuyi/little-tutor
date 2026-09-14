@@ -77,6 +77,7 @@ def record_teacher_decision(
     decision: str,
     session_id: str | None,
     question_id: str | None,
+    note: str | None = None,
 ) -> None:
     """记录 AI 建议与老师决定，reject 同样留痕。"""
     with SessionLocal() as s:
@@ -87,5 +88,46 @@ def record_teacher_decision(
             question_id=int(question_id) if question_id else None,
             decision=decision,
             proposal=dict(proposal),
+            note=note,
+        ))
+        s.commit()
+
+
+def correct_error_type(
+    student_id: str,
+    question_id: str,
+    kp_id: str,
+    session_id: str | None,
+    before: str | None,
+    after: str,
+    note: str | None = None,
+) -> None:
+    """老师修正题级错因：更新事实字段并保留修正链。"""
+    with SessionLocal() as s:
+        record = (
+            s.query(AnswerRecord)
+            .filter(
+                AnswerRecord.student_id == int(student_id),
+                AnswerRecord.question_id == int(question_id),
+                AnswerRecord.session_id == session_id,
+            )
+            .order_by(AnswerRecord.id.desc())
+            .first()
+        )
+        if record is None:
+            raise ValueError("找不到对应的作答记录")
+        record.error_type = after
+        s.add(TeacherDecision(
+            student_id=int(student_id),
+            kp_id=int(kp_id),
+            session_id=session_id,
+            question_id=int(question_id),
+            decision="edit",
+            proposal={
+                "error_type_before": before,
+                "error_type_after": after,
+                "reason": "teacher_error_type_correction",
+            },
+            note=note,
         ))
         s.commit()

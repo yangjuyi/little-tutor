@@ -34,7 +34,9 @@ canvas{display:block;width:100%;height:100%}
 </head>
 <body>
 <h1>本次练习结果</h1>
-{% if h3_decision == "accept" %}
+{% if test_session %}
+<p class="status warn">本次标记为测试会话，只保留答题记录和老师决定，不更新学生画像。</p>
+{% elif h3_decision == "accept" %}
 <p class="status ok">学生画像已更新，后续出题会参考本次练习表现。</p>
 {% else %}
 <p class="status warn">本次未更新学生画像，答题记录和老师决定已保留。</p>
@@ -164,7 +166,7 @@ drawRadar(
 );
 drawRadar(
   "errorRadar",
-  ["审题", "概念", "计算", "跳步", "粗心"],
+  ["审题", "概念", "计算", "跳步", "粗心", "漏根"],
   {{ error_values | tojson }},
   "#b3261e",
   "rgba(179,38,30,.18)"

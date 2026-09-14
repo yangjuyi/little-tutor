@@ -72,4 +72,5 @@ class SessionState(TypedDict):
     round_results: List[QuestionResult]
     session_proposals: List[dict]
     h3_decision: Literal["accept", "reject"]
+    test_session: bool
     phase: Literal["assemble", "answer", "grade_round", "summarize", "done"]

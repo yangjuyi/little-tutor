@@ -7,6 +7,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse
 
 from app.application import student_practice as practice
+from app.domain.types import ERROR_TYPE_OPTIONS
 from app.web.auth import TEACHER_COOKIE, teacher_cookie_value, teacher_redirect
 from app.web.dependencies import templates
 
@@ -193,6 +194,7 @@ def summary_page(request: Request):
                 "proposals": view["proposals"],
                 "round_results": view["round_results"],
                 "questions": view["questions"],
+                "error_types": ERROR_TYPE_OPTIONS,
             },
         )
     if view["kind"] == "done":
@@ -215,8 +217,22 @@ async def summary_post(request: Request):
         for key, value in form.items()
         if key.startswith("level_") and value
     }
+    error_corrections = {
+        key.removeprefix("error_"): str(value)
+        for key, value in form.items()
+        if key.startswith("error_") and value
+    }
+    test_mode = str(form.get("test_session") or "").lower() in (
+        "1", "true", "on", "yes",
+    )
     try:
-        practice.resolve_summary(thread, decision, corrections)
+        practice.resolve_summary(
+            thread,
+            decision,
+            corrections,
+            error_corrections,
+            test_mode,
+        )
     except practice.PracticeBusy:
         return RedirectResponse("/teacher/summary?busy=1", status_code=303)
     return RedirectResponse("/done", status_code=303)

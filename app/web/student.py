@@ -164,6 +164,7 @@ def done_page(request: Request):
     context = build_done_context(values)
     context.update({
         "h3_decision": values.get("h3_decision"),
+        "test_session": bool(values.get("test_session")),
         "detail_url": f"/answer/{context['total']}" if context["total"] else "/",
     })
     return templates.TemplateResponse(request, "done.html", context)

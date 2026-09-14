@@ -29,12 +29,14 @@ from app.adapters.checkpoint import default_checkpointer
 from app.adapters.persistence import Question as QuestionRow, SessionLocal
 from app.adapters.review_store import (
     apply_to_db,
+    correct_error_type,
     record_answer,
     record_teacher_decision,
 )
 from app.adapters.session_store import (
     abort_practice_session,
     complete_practice_session,
+    mark_practice_session_test,
     review_practice_session,
 )
 from app.application.profile_evidence import propose_mastery_change
@@ -49,6 +51,7 @@ from app.domain.grading import (
 )
 from app.domain.question_design import build_designed_question
 from app.domain.question_edit import recompute_edited_question
+from app.domain.types import ERROR_TYPE_OPTIONS
 from app.harness.question_assembly import (
     check_assemble_node,
     gen_candidate_node,
@@ -423,18 +426,25 @@ def summarize_profile_node(state: SessionState) -> dict:
 
 
 def h3_write_back_node(state: SessionState) -> dict:
-    """H3 批量确认（interrupt②）：允许老师修正等级后再 accept/reject。"""
+    """H3 批量确认（interrupt②）：允许老师修正等级、错因和测试标记。"""
     raw_decision = interrupt({
         "proposals": state["session_proposals"],
-        "actions": "accept / reject",
+        "actions": "accept / reject / correct error type / mark test session",
     })
     corrections: dict[str, str] = {}
+    error_corrections: dict[str, str] = {}
+    test_mode = False
     if isinstance(raw_decision, dict):
         text = str(raw_decision.get("decision") or "").strip().lower()
         corrections = {
             str(key): str(value)
             for key, value in (raw_decision.get("corrections") or {}).items()
         }
+        error_corrections = {
+            str(key): str(value)
+            for key, value in (raw_decision.get("error_corrections") or {}).items()
+        }
+        test_mode = bool(raw_decision.get("test_mode"))
     else:
         text = str(raw_decision or "").strip().lower()
     if text not in ("accept", "reject"):
@@ -449,13 +459,46 @@ def h3_write_back_node(state: SessionState) -> dict:
             proposal["suggest_level"] = corrected
             proposal["teacher_corrected"] = True
         proposals.append(proposal)
-    if text == "accept":
+    if text == "accept" and not test_mode:
         for proposal in proposals:
             apply_to_db(state["student_id"], proposal)
+
+    round_results = [
+        dict(result) for result in (state.get("round_results") or [])
+    ]
+    questions = state.get("approved_questions") or []
+    for idx, result in enumerate(round_results):
+        corrected = error_corrections.get(str(idx))
+        if not corrected:
+            continue
+        if corrected not in ERROR_TYPE_OPTIONS:
+            raise ValueError(f"修正错因非法：{corrected}")
+        error = dict(result.get("error") or {})
+        before = error.get("error_type")
+        if corrected == before:
+            continue
+        error["error_type"] = corrected
+        error["teacher_corrected"] = True
+        error["teacher_reviewed"] = True
+        result["error"] = error
+        question = questions[idx] if idx < len(questions) else {}
+        correct_error_type(
+            state["student_id"],
+            str(question.get("id")),
+            str(question.get("kp_id")),
+            state.get("session_id"),
+            str(before) if before is not None else None,
+            corrected,
+        )
+
+    if test_mode:
+        mark_practice_session_test(str(state["session_id"]))
+
     for proposal in proposals:
         record_teacher_decision(
             state["student_id"], proposal, text,
             state.get("session_id"), None,
+            note="测试会话" if test_mode else None,
         )
     review_practice_session(
         str(state["session_id"]),
@@ -464,6 +507,8 @@ def h3_write_back_node(state: SessionState) -> dict:
     return {
         "session_proposals": proposals,
         "h3_decision": text,
+        "test_session": test_mode,
+        "round_results": round_results,
         "phase": "done",
     }
 

@@ -88,6 +88,26 @@ def start_practice_session(
         s.commit()
 
 
+def set_practice_session_data_source(
+    session_id: str,
+    data_source: str,
+) -> None:
+    """更新会话数据来源；test/demo 不进入掌握度证据。"""
+    if data_source not in ("real", "demo", "test"):
+        raise ValueError("data_source 必须是 real/demo/test")
+    with SessionLocal() as s:
+        row = s.get(PracticeSessionRecord, session_id)
+        if row is None:
+            raise ValueError(f"会话不存在：{session_id}")
+        row.data_source = data_source
+        s.commit()
+
+
+def mark_practice_session_test(session_id: str) -> None:
+    """把整场会话标记为测试数据，排除出画像证据。"""
+    set_practice_session_data_source(session_id, "test")
+
+
 def complete_practice_session(session_id: str) -> None:
     """将会话标记为已完成并进入待审核；重复调用保持幂等。"""
     with SessionLocal() as s:

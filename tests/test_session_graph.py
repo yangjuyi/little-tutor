@@ -709,6 +709,90 @@ class TestSessionGraph(unittest.TestCase):
             self.assertEqual(decision.proposal["suggest_level"], "strong")
             self.assertTrue(decision.proposal["teacher_corrected"])
 
+    def test_h3_teacher_corrects_error_type_and_records_decision(self):
+        graph, config = self._assemble(2)
+        graph.invoke(Command(resume="approve"), config)
+        question = graph.get_state(config).values["approved_questions"][0]
+        template, steps = self._correct_steps(question["params"])
+        with patch.object(
+            sg, "grade_question", return_value=_fake_grade(False, self.kp_id)
+        ):
+            graph.invoke(
+                {"student_id": str(self.student_id), "session_id": "sess-1",
+                 "current_question": question, "template": template,
+                 "student_steps": steps, "phase": "grade_round"},
+                config,
+            )
+        graph.invoke(
+            {"student_id": str(self.student_id), "session_id": "sess-1",
+             "phase": "summarize"},
+            config,
+        )
+        graph.invoke(
+            Command(resume={
+                "decision": "accept",
+                "error_corrections": {"0": "漏根"},
+            }),
+            config,
+        )
+        values = graph.get_state(config).values
+        self.assertEqual(values["round_results"][0]["error"]["error_type"], "漏根")
+        self.assertTrue(values["round_results"][0]["error"]["teacher_corrected"])
+        with self.session() as s:
+            answer = s.query(db.AnswerRecord).one()
+            self.assertEqual(answer.error_type, "漏根")
+            decisions = (
+                s.query(db.TeacherDecision)
+                .order_by(db.TeacherDecision.id)
+                .all()
+            )
+            self.assertEqual(len(decisions), 2)
+            correction = next(
+                decision for decision in decisions
+                if decision.decision == "edit"
+            )
+            self.assertEqual(correction.decision, "edit")
+            self.assertEqual(correction.question_id, int(question["id"]))
+            self.assertEqual(
+                correction.proposal["error_type_before"], "计算"
+            )
+            self.assertEqual(
+                correction.proposal["error_type_after"], "漏根"
+            )
+
+    def test_h3_test_session_skips_mastery_and_marks_data_source(self):
+        graph, config = self._assemble(2)
+        graph.invoke(Command(resume="approve"), config)
+        question = graph.get_state(config).values["approved_questions"][0]
+        template, steps = self._correct_steps(question["params"])
+        with patch.object(
+            sg, "grade_question", return_value=_fake_grade(True, self.kp_id)
+        ):
+            graph.invoke(
+                {"student_id": str(self.student_id), "session_id": "sess-1",
+                 "current_question": question, "template": template,
+                 "student_steps": steps, "phase": "grade_round"},
+                config,
+            )
+        graph.invoke(
+            {"student_id": str(self.student_id), "session_id": "sess-1",
+             "phase": "summarize"},
+            config,
+        )
+        graph.invoke(
+            Command(resume={"decision": "accept", "test_mode": True}),
+            config,
+        )
+        values = graph.get_state(config).values
+        self.assertTrue(values["test_session"])
+        with self.session() as s:
+            self.assertEqual(s.query(db.Mastery).count(), 0)
+            session = s.get(db.PracticeSessionRecord, "sess-1")
+            self.assertEqual(session.data_source, "test")
+            self.assertEqual(session.review_status, "accepted")
+            decision = s.query(db.TeacherDecision).one()
+            self.assertEqual(decision.note, "测试会话")
+
 
 if __name__ == "__main__":
     unittest.main()

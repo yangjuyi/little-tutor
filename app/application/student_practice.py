@@ -427,13 +427,16 @@ def resolve_summary(
     thread_id: str,
     decision: str,
     corrections: dict[str, str] | None = None,
+    error_corrections: dict[str, str] | None = None,
+    test_mode: bool = False,
 ) -> None:
     """提交老师对批量画像的最终决定。"""
-    payload = (
-        {"decision": decision, "corrections": corrections}
-        if corrections
-        else decision
-    )
+    payload = {
+        "decision": decision,
+        "corrections": corrections or {},
+        "error_corrections": error_corrections or {},
+        "test_mode": test_mode,
+    }
     with _session_guard(thread_id):
         _get_graph().invoke(
             Command(resume=payload), _config(thread_id)

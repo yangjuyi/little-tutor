@@ -105,6 +105,30 @@ class TestSessionStore(unittest.TestCase):
             set(),
         )
 
+    def test_mark_session_test_excludes_mastery_evidence(self):
+        session_store.start_practice_session(
+            "S20260912-004", self.student_id, self.kp_id
+        )
+        session_store.complete_practice_session("S20260912-004")
+        session_store.review_practice_session(
+            "S20260912-004", "accepted"
+        )
+        self.assertEqual(
+            session_store.eligible_session_ids(self.student_id, self.kp_id),
+            {"S20260912-004"},
+        )
+
+        session_store.mark_practice_session_test("S20260912-004")
+        self.assertEqual(
+            session_store.eligible_session_ids(self.student_id, self.kp_id),
+            set(),
+        )
+        session_store.mark_practice_session_test("S20260912-004")
+        with self.session() as s:
+            row = s.get(db.PracticeSessionRecord, "S20260912-004")
+            self.assertEqual(row.data_source, "test")
+            self.assertEqual(row.review_status, "accepted")
+
     def test_lifecycle_operations_are_idempotent(self):
         session_store.start_practice_session(
             "S20260912-002", self.student_id, self.kp_id
