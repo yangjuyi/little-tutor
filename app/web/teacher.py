@@ -130,9 +130,9 @@ def review_edit(
     request: Request,
     no: str = Form(""),
     stem: str = Form(""),
-    a: float = Form(...),
-    b: float = Form(...),
-    c: float = Form(...),
+    a: str = Form(...),
+    b: str = Form(...),
+    c: str = Form(...),
     structure_tag: str = Form(""),
 ):
     redirect = teacher_redirect(request)

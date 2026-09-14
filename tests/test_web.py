@@ -331,6 +331,14 @@ class TestWebFlow(unittest.TestCase):
         self.assertEqual(resp.status_code, 303)
         page = self.client.get("/teacher/review")
         self.assertIn(edited_stem, page.text)
+        updated = student_practice.get_graph().get_state({
+            "configurable": {
+                "thread_id": self.client.cookies.get("thread_id")
+            }
+        }).values["candidates"][0]
+        self.assertIsInstance(updated["params"]["a"], int)
+        self.assertIsInstance(updated["params"]["b"], int)
+        self.assertIsInstance(updated["params"]["c"], int)
         self.client.post(
             "/teacher/review", data={"decision": "approve"}
         )

@@ -193,9 +193,9 @@ def edit_question(
     thread_id: str,
     number: str,
     stem: str,
-    a: float,
-    b: float,
-    c: float,
+    a: str | int | float,
+    b: str | int | float,
+    c: str | int | float,
     structure_tag: str = "",
 ) -> None:
     """保存老师对预审题干的修改，并返回预审页继续确认。"""

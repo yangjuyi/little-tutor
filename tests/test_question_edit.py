@@ -157,6 +157,62 @@ class TestQuestionEdit(unittest.TestCase):
                 c=-21,
             )
 
+    def test_integral_coefficients_are_stored_as_integers(self):
+        question = {
+            "id": 1,
+            "difficulty": "simple",
+            "stem": "旧题干",
+            "answer": "旧答案",
+            "analysis": "旧解析",
+            "params": {
+                "a": 1,
+                "b": 4,
+                "c": -21,
+                "design_id": "rectangle",
+                "structure_tag": "",
+            },
+        }
+        edited = recompute_edited_question(
+            question,
+            stem=(
+                "一块长方形菜地的宽为 x 米，长比宽多 4 米，"
+                "面积为 12 平方米。求这块菜地的宽。"
+            ),
+            a="1",
+            b="4.0",
+            c="-12.0",
+        )
+        self.assertIsInstance(edited["params"]["a"], int)
+        self.assertIsInstance(edited["params"]["b"], int)
+        self.assertIsInstance(edited["params"]["c"], int)
+        self.assertEqual(edited["params"]["a"], 1)
+        self.assertEqual(edited["params"]["b"], 4)
+        self.assertEqual(edited["params"]["c"], -12)
+
+    def test_non_numeric_coefficient_is_rejected(self):
+        question = {
+            "id": 1,
+            "difficulty": "simple",
+            "stem": "旧题干",
+            "answer": "旧答案",
+            "analysis": "旧解析",
+            "params": {
+                "a": 1,
+                "b": 4,
+                "c": -21,
+                "design_id": "rectangle",
+                "structure_tag": "",
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "a 必须是数字"):
+            recompute_edited_question(
+                question,
+                stem="一块长方形菜地的宽为 x 米，长比宽多 4 米，面积为 12 平方米。求这块菜地的宽。",
+                a="abc",
+                b="4",
+                c="-12",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
