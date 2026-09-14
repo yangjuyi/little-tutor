@@ -416,7 +416,7 @@
 
 | 表 | 存什么 | 关键字段 |
 |---|---|---|
-| `user` | 账号（JWT 登录，auth 层，2026-08-31 加）| id, username, password_hash, role(student/teacher), created_at |
+| `user` | 账号（认证层；JWT 仅候选实现，最终以 Cookie 会话 + RBAC 为准）| id, username, password_hash, role(student/teacher), created_at |
 | `student` | 学生业务信息 | user_id, name, grade, target, teacher_notes |
 | `answer_record` | 答题记录（含分步/断点/归因/题级画像）| session_id, student_id, question_id, kp_id, steps[], is_correct, error_type, confidence, created_at |
 | `mastery` | 掌握度（批级画像落点）| student_id, kp_id, level, confidence, evidence, last_reviewed |
@@ -467,10 +467,10 @@
 
 ## 11. 技术栈与目录结构
 
-**技术栈**：Python 3.12 · LangGraph · LangChain · SQLite · FastAPI（V1 起）· Chroma（RAG 知识库）· Matplotlib（V3 图形渲染）· **SymPy（符号计算，V2 难题求解器）** · **Vue SPA（前端，V3 完整交互）** · **JWT 认证（贴 Vue SPA，P3 服务化时实现）**
+**技术栈**：Python 3.12 · LangGraph · LangChain · SQLite · FastAPI · Chroma（RAG，V3.1）· Matplotlib（V3 图形渲染）· SymPy（符号计算，V2/V2.5）· Vue 3 + TypeScript + Vite（V3.0）· httpOnly Cookie + CSRF + 服务端 RBAC
 
-- **前端 = Vue SPA**（学生答题页 + 老师看板），后端 FastAPI 出 JSON API，前后端分离。V1 demo 用 Vue+Vite。
-- **认证 = JWT**（`pyjwt` + `passlib[bcrypt]`）：登录→后端签 token→前端 localStorage 存（V1 短过期兜底）→请求带 `Authorization: Bearer`。httpOnly cookie + CSRF 处理留部署升级。
+- **前端 = Vue 3 角色化 SPA**（`StudentShell` / `TeacherWorkspace` / `ParentReport`），后端 FastAPI 出 JSON API，前后端分离。V2 的 Jinja2 页面继续作为 Harness 演示壳，不作为最终产品界面。
+- **认证 = httpOnly + Secure + SameSite Cookie + CSRF + 服务端 RBAC**。JWT 只作为身份声明的一种实现，不放 localStorage。
 - **安全驱动选型**（§13.1）：API key 不落日志/gitignore；发 LLM 前脱敏最小化；私有题库按需下发无全库导出接口。
 - **Prompt 版本管理（2026-09-01 补）**：所有 prompt 存独立文件（不硬编码在 Python 代码里），每个文件头部标注版本号与变更原因，git 管版本。迭代 Grader/出题 prompt 时可回退、可对比评测结果。
 
@@ -502,7 +502,11 @@ little-tutor/
 
 ---
 
-## 12. V2 / V3 路线（保留，后续迭代改）
+## 12. V2 / V2.5 / V3 路线
+
+> 当前执行优先级以 `ROADMAP.md` 为准。本节保留产品细节和能力清单。
+> 旧版把多 Agent、RAG、知识图谱、OCR、物理化学和 Web 同时塞进一个 V3
+> 的写法已废弃，按 V2.5 → V3.0 → V3.1 → V3.2 → V3.3 分阶段执行。
 
 ### V2（仍仅数学）
 - **判分表示升级（2026-09-04 定）**：V1 一元二次方程的答案链路为 `float`（`compute_answer` 返回浮点、`answer` 存数字字符串），配 `extract_numbers` + 0.01 容差判定。V2 数学扩展（分式方程/绝对值方程/二次函数综合等）答案结构超出纯数字后，需将标准答案与学生输入的表示层升级为精确符号表达式（SymPy parse）：标准答案存 SymPy 可解析的精确形式（如 `sqrt(5)/2 + 1`），学生输入 parse 后做 `simplify(student - expected) == 0` 符号等价判定；化简失败退数值采样验证（多随机点高精度求值差趋零）。含自由变量表达式（如 `e·ln(x)`）同理，SymPy 直接做符号等价。架构前提：题目参数与答案的 DB schema / JSON 格式同步从数值升级为精确表达式字符串。AI 仍不做对错判定，符号判定与采样验证均为确定性程序逻辑。
@@ -523,6 +527,8 @@ little-tutor/
 - **高中计算型（V2 求解器扩展）**：导数题（求导/极值/恒成立/分类讨论）+ 解析几何 + 数列 + 三角 + 立体向量——SymPy 全可算，程序回代验证。**导数恒成立/不等式 → 构造辅助函数求最值程序判定**；分类讨论 → 程序枚举参数区间逐类验
 
 ### V3（扩展到物理/化学）
+
+> 以下条目是 V3 能力清单，不等于同一次发布；具体排期见 `ROADMAP.md`。
 - **学科插件方针（2026-09-12 定）**：学科能力分为三类插件，避免形成学科 `if/else`
   或单一“综合大插件”。`SubjectPlugin` 负责单学科题面解析、答案 schema、
   单位/符号规则、求解器、判分器和证据分级；`TrainingPlugin` 负责一次训练的
@@ -541,15 +547,18 @@ little-tutor/
   7. **电路拓扑 schema**：电学压轴题需要节点/元件/连接关系的结构化表示，纯文字题干推不出电路结构。
 - **知识库定位（2026-09-04 定）**：上述"库"分两类，不能笼统叫 RAG。①**结构化查表**（方程式库/公式模板/Ksp 表/伏安特性表）= 精确查找，程序直接查，不走向量检索，查错即判分事故。②**RAG 知识库** = 只服务开放表述判定（现象描述/操作理由/结论书写）：学生答案 → 向量检索相似标准答案与评分要点 → AI 报证据与置信度 → 老师终审。**RAG 全部放 V3**，V2 数学场景用不上，提前建只会是没跑过真实场景的死代码。V2 只需把答案数据结构预留为"结构化集合"（枚举/关键词列表），供 V3 复用。
 - **扩展合格标准（2026-09-04 定）**：V3 物理/化学扩展的"基础验证合格"不是"架构上说得通"，而是**整卷级真题回灌**：挑若干套真实试卷，把题目录入 schema 后跑完整判分管线，标准 = **程序能解的题必须全部端到端跑通**（出题 → 程序算标准答案 → 模拟学生作答 → 程序判分 → 归因 → 老师确认闭环），程序解不了但老师能判的题（过程分/开放表述）必须正确落入"AI 报证据 + 老师终审"路径，不允许静默判错或跳过。跑通才算扩展完成，跑不通就继续补缺口。
-- 完整多 Agent（Coordinator / QuestionGenerator / Grader / Planner / ProfileUpdater）——**注意：无 Explainer，讲解归老师，系统不做讲解 Agent**
+- V2.5 多 Agent 教学子图：Diagnosis / Teaching Supervisor（第一版规则状态机）/
+  Scaffold-Hint / Critic / Profile Proposal；Reference Solution 只进老师证据链。
+  **不设 Explainer，讲解归老师。**
 - 跨知识点前置关系（知识图谱）
 - 图形题（AI 出参数 + 代码渲染）
-- FastAPI + 更完善的 Web/APP
+- V3.0 Vue 角色化前端 + FastAPI API + 移动端体验
 - 评测（题目质量 / 讲解效果）
 - 归因一致性校验（测的错因分布 vs 练的错因分布）
 - 趋势优化（出题侧重防"越补越显该补"的偏置陷阱）
 - **辅助线/圆综合强化（2026-08-31 定，服务"中考压轴题"层而非奥赛）**：①辅助线作为"可验证构造步骤"（声明构造+意图，程序验构造良定义）②圆定理库（约30条）+长链推理时扩展 ③搜索式辅助线生成（LLM提候选→程序验哪条能闭环到待证结论，TongGeometry 思路）④几何代数化兜底（坐标化→SymPy 真值判定，吴方法延伸）。**目标 = 中考压轴题**（中等偏上学生冲满分，中考压轴题常是"圆+综合+辅助线"，属"练出来的 strong"上限）。**奥赛层无产品需求、不作为用户定位**（奥赛选手有专业竞赛体系，非 little-tutor 客户）；技术路径仅作能力上限展示/面试谈资。老师兜底 + HITL 为最终裁判。
-- **多模态手写识别扩展至物理/化学（2026-09-01 补）**：V3 引入多模态 LLM（GLM-OCR / PaddleOCR-VL）识别学生手写物理受力图/化学方程式，扩展模板填空至非数学学科。需为物理/化学设计独立的作答模板体系（与数学步骤结构不同）。
+- **光学识别（2026-09-14 校准）**：OCR 作为可插拔输入适配器排 V3.3；先识别
+  最终答案，关键步骤需确认；不把手写画布作为前置条件。
 - **证明题可程序化框架（2026-08-31 定，初高中证明通用）**：分水岭 = **"能否转成可计算对象"**——能转的（函数最值/代数真值/定理链）程序验，纯技巧的 LLM 提+老师兜底。**不等式证明**：构造函数求最值（高中主流）/ 多项式 SOS 平方和分解 / 标准不等式模板库；**导数恒成立**：构造辅助函数求最值程序判定。**两层级验证**：①数值抽样验证（随机采样，抓错滤网，错的放缩会在采样点露馅）②符号精确验证（SymPy 最值/SOS/代数真值）→ 判定。高中几何基本向量化/解析化 → 全可算。
 
 ---
@@ -696,7 +705,7 @@ V1 核心端点（约 6-8 个），写码前锁定，避免前后端各写一套
 
 | 端点 | 方法 | 用途 | 请求体 | 返回 |
 |---|---|---|---|---|
-| `/api/auth/login` | POST | 登录签 JWT | `{username, password}` | `{token, role}` |
+| `/api/auth/login` | POST | 登录并建立服务端会话 | `{username, password}` | `{role}` + httpOnly Cookie |
 | `/api/sessions` | POST | 开新会话 | `{student_id, kp_id}` | `{session_id, questions[], mode}` |
 | `/api/sessions/{sid}/answer` | POST | 学生提交单题作答 | `{question_id, steps[]}` | `{status: "pending_grade"}` |
 | `/api/sessions/{sid}/hint` | POST | 学生发起求助 | `{question_id}` | `{message: "已通知老师"}` |
@@ -705,7 +714,8 @@ V1 核心端点（约 6-8 个），写码前锁定，避免前后端各写一套
 | `/api/teacher/confirm` | POST | 老师 H3 批量确认 | `{decisions[], profile_updates[]}` | `{written: true}` |
 | `/api/teacher/hint` | POST | 老师发提示给学生 | `{session_id, question_id, text}` | `{sent: true}` |
 
-- 所有端点需带 `Authorization: Bearer {token}` 请求头（JWT）。
+- 浏览器端使用 httpOnly + Secure + SameSite Cookie；写操作带 CSRF token；
+  权限由服务端 RBAC 校验。JWT 如后续使用，只作为身份声明，不放 localStorage。
 - 具体字段随开发微调，但端点数量和职责在写码前锁定。
 
 ### 13.7 测试策略（2026-09-01 补）
@@ -1101,16 +1111,13 @@ Docker 重启时正在执行的 Grader 调用会被中断。FastAPI lifespan han
   P3 随 Web 实现（Web 有了才发得出去）
 
 ### 下一步建议
-1. V2 执行顺序：Prompt 前置 → B0 词汇表统一 → B2 难度参数化 → B3 正确率归因 →
-   B1 掌握度规则 → B4 学生即时反馈 → 种子题库 → A 模板填空（均已完成，
-   2026-09-09；P2 持久化第一步 SqliteSaver、C 会话级图、简易 Web 演示版、
-   P2 Send 扇出/批改子图/LLM 兜底均已完成）→ **V2 全部落地（2026-09-09）**。
-   下一阶段：P3 Web 产品化 / 物理化学学科扩展 / 外环 exam 模式（批改扇出
-   随 exam 批量提交落地）。
-2. P2 并行：SqliteSaver 持久化 checkpoint（已完成 2026-09-09）/
-   Send 并发 / 子图 / LLM 全局异常兜底。
-3. 多学生服务化前补 user/session_counter 表 + session_id 原子生成。
-4. 手撕代码练习路线（见记忆笔记）：profile_update → graph → agents → state → db/run_mvp。
+1. V2 收口：错因修正/测试标记、脚手架交互、桌面和手机完整验收；模板填空
+   继续作为默认输入。V2 主体已完成，但不再标记为“全部落地”。
+2. V2.5：过程诊断旁路接入 + 多 Agent 教学子图 + Trace/证据分级。
+3. V3.0：Vue 角色化前端 + FastAPI API；V3.1：RAG/评测/模型路由；
+   V3.2：基础设施；V3.3：物理化学插件 + OCR 输入适配器。
+4. 多学生服务化前补 user/session_counter 表 + session_id 原子生成。
+5. 手撕代码练习路线（见记忆笔记）：profile_update → graph → agents → state → db/run_mvp。
 
 ---
 
@@ -1201,7 +1208,7 @@ from typing import TypedDict, Literal, Optional, List
 
 Level     = Literal["weak", "mid", "strong"]
 DifficultyLevel = Literal["simple", "mid", "hard"]   # B0：题目难度与掌握度分域（2026-09-09 同步实现契约）
-ErrorType = Literal["审题", "概念", "计算", "跳步", "粗心", "无错"]
+ErrorType = Literal["审题", "概念", "计算", "跳步", "粗心", "漏根", "无错"]
 
 # ---------- 数据模型（落库/题库文件）----------
 class Mastery(TypedDict):          # SQL: mastery 表一行
@@ -1224,6 +1231,28 @@ class Question(TypedDict):         # 题库 JSON 一条 / 出题产出
 class StudentStep(TypedDict):      # 学生分步作答的一步
     basis: str                     # 依据（定理/公式/条件）→ 判概念/审题
     result: str                    # 结果（数值/文字）→ 判计算
+
+class StudentStepV2(TypedDict):    # V2.5 过程诊断契约（见 ARCHITECTURE.md）
+    step_no: int
+    raw_latex: str
+    operation: str
+    source: Literal["typed", "template", "photo", "canvas"]
+    confidence: float
+
+class Submission(TypedDict):
+    mode: Literal["final_answer_only", "step_by_step"]
+    steps: List[StudentStepV2]
+    final_answer: str
+
+class TransitionCheck(TypedDict):
+    from_step: int
+    to_step: int
+    is_valid: bool
+    rule: str
+    error_type: Optional[ErrorType]
+    evidence: str
+    confidence: float
+    insufficient_evidence: bool
 
 class Blank(TypedDict):            # 模板空位（A 定稿：schema 稳定契约，供给方可替换）
     id: str

@@ -1,8 +1,10 @@
 # little-tutor V2 验收矩阵
 
-更新时间：2026-09-13
+更新时间：2026-09-14
 
 自动化与真实体验验证流程见 `VERIFICATION_PLAYBOOK.md`。
+本文件只评估 V2 收口；过程诊断和多 Agent 教学子图属于 V2.5，不作为 V2
+完成门槛。执行优先级见 `ROADMAP.md`。
 
 ## 已通过
 
@@ -10,7 +12,10 @@
 |---|---|---|
 | 真实 LLM 闭环 + 老师 accept | 通过 | `scripts/e2e_smoke.py 2 accept`，2 题真实归因、mastery 写入、review=accepted |
 | 真实 LLM 闭环 + 老师 reject | 通过 | `scripts/e2e_smoke.py 2 reject`，事实与决定落库、mastery 不写、review=rejected |
-| 自动化回归 | 通过 | 180 项测试 |
+| 真实 LLM 错误链路 + accept | 通过 | `scripts/e2e_smoke.py 2 accept wrong`，首题错误归因 `概念`，mastery 写入 |
+| 真实 LLM 错误链路 + reject | 通过 | `scripts/e2e_smoke.py 2 reject wrong`，首题错误归因 `计算`，mastery 不写 |
+| 过程诊断领域切片 | 通过 | `tests/test_process_diagnosis.py`，尚未接入主链路，排 V2.5 |
+| 自动化回归 | 通过 | 188 项测试 |
 | 会话证据准入 | 通过 | 仅 real + completed + accepted 进入画像 |
 | 测试/中断/拒绝隔离 | 通过 | 对应自动化测试 |
 | checkpoint 跨图实例恢复 | 通过 | 暂停、重建图实例、继续审批后恰好落库一次 |
@@ -60,3 +65,4 @@
 1. 实现错因修正和测试标记。
 2. 实现脚手架交互。
 3. 复跑真实 LLM 和浏览器验收矩阵。
+4. V2 收口后再进入 V2.5 过程诊断旁路接入和多 Agent 教学子图。

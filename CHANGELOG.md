@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 统一 V2 / V2.5 / V3 路线口径：`README.md`、`V2_ACCEPTANCE.md`、
+  `PROJECT_SPEC.md` 以 `ROADMAP.md` 为唯一优先级来源；V2 先收口用户侧闭环，
+  V2.5 接过程诊断和多 Agent 教学子图，V3 分阶段做体验、知识/评测、
+  基础设施和学科插件。
+
 ### Fixed
 
 - 题库派生字段以 `params + design_id` 为唯一事实源：旧题入池前重算
