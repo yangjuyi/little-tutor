@@ -18,7 +18,12 @@
 ```powershell
 .\.venv\Scripts\python.exe -X utf8 scripts\e2e_smoke.py 2 accept
 .\.venv\Scripts\python.exe -X utf8 scripts\e2e_smoke.py 2 reject
+.\.venv\Scripts\python.exe -X utf8 scripts\e2e_smoke.py 2 accept wrong
+.\.venv\Scripts\python.exe -X utf8 scripts\e2e_smoke.py 2 reject wrong
 ```
+
+`wrong` 模式会让首题最终答案错误，用于验证程序判分、错误证据落库、
+AI 归因或程序兜底，以及 H3 在错误作答下的 accept/reject 分流。
 
 LLM 网络不可用时，冒烟允许走“程序判分 + 归因不可用”兜底，但必须满足：
 
