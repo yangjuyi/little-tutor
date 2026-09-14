@@ -388,6 +388,7 @@ def collect_round_node(state: SessionState) -> dict:
         "approved_questions": selected,
         "adaptive_target": next_target,
         "hint_level": 0,
+        "scaffold_level": 0,
         "phase": "answer",
     }
 

@@ -20,6 +20,8 @@ body{font-family:sans-serif;max-width:760px;margin:0 auto;padding:16px;backgroun
 .hint{background:#fff7df;border-left:5px solid #c77d0a;color:#5f4300;line-height:1.6}
 .hint .hint-head{font-weight:bold;margin-bottom:5px}
 .hint button{margin-top:9px;background:#fff;border:1px solid #c77d0a;color:#8a5a00;border-radius:5px;padding:7px 10px;cursor:pointer}
+.scaffold{background:#eef4ff;border-left:5px solid #1a5fb4;color:#263b5e;line-height:1.6}
+.scaffold .scaffold-head{font-weight:bold;margin-bottom:5px}
 .stem{font-size:17px;margin:6px 0}
 .blank{margin:16px 0}
 .blank .no{display:inline-block;width:24px;height:24px;background:#1a5fb4;color:#fff;border-radius:50%;text-align:center;line-height:24px;font-size:13px;margin-right:6px}
@@ -28,6 +30,7 @@ label.opt{display:block;margin:8px 0;font-size:15px;cursor:pointer}
 label.opt input{margin-right:8px;transform:scale(1.2)}
 button.submit{width:100%;background:#1a5fb4;color:#fff;border:0;border-radius:6px;padding:12px;font-size:16px;font-weight:bold;cursor:pointer}
 button.submit:hover{background:#174f96}
+button.submit.secondary{background:#eef4ff;color:#1a5fb4;border:1px solid #1a5fb4}
 details.meta summary{cursor:pointer}
 </style>
 </head>
@@ -65,6 +68,17 @@ details.meta summary{cursor:pointer}
   <div>{{ hint }}</div>
 </div>
 {% endif %}
+{% if scaffold_level > 0 %}
+<div class="card scaffold">
+  <div class="scaffold-head">分步帮助 {{ scaffold_level }}/2</div>
+  <div>{{ scaffold }}</div>
+</div>
+{% endif %}
+{% if hint_level > 0 and scaffold_level < 2 %}
+<form method="post" action="/scaffold/{{ idx }}">
+  <button class="submit secondary" type="submit">还是不会，给我分步帮助</button>
+</form>
+{% endif %}
 {% if hint_level < 3 %}
 <form method="post" action="/hint/{{ idx }}">
   <button class="submit" type="submit">{% if hint_level %}再提示一级{% else %}需要提示{% endif %}</button>
@@ -95,9 +109,12 @@ document.querySelectorAll("form").forEach(function (form) {
       var b = form.querySelector("button.submit");
       if (!b) return;
       b.disabled = true;
-      b.textContent = form.getAttribute("action").startsWith("/hint/")
+      var action = form.getAttribute("action");
+      b.textContent = action.startsWith("/hint/")
         ? "获取提示…"
-        : "批改中…（程序判分 + AI 归因，几秒到十几秒）";
+        : action.startsWith("/scaffold/")
+          ? "生成分步帮助…"
+          : "批改中…（程序判分 + AI 归因，几秒到十几秒）";
     }, 0);
   });
 });

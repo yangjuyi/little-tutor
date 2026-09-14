@@ -72,6 +72,8 @@ def answer_page(request: Request, idx: int):
             "question": view["question"],
             "hint_level": view["hint_level"],
             "hint": view["hint"],
+            "scaffold_level": view["scaffold_level"],
+            "scaffold": view["scaffold"],
             "blanks": view["blanks"],
             "busy": request.query_params.get("busy") == "1",
             "completed": False,
@@ -117,6 +119,18 @@ def hint_request(request: Request, idx: int):
         return RedirectResponse("/", status_code=303)
     try:
         practice.request_hint(thread, idx)
+    except practice.PracticeBusy:
+        return RedirectResponse(f"/answer/{idx}?busy=1", status_code=303)
+    return RedirectResponse(f"/answer/{idx}", status_code=303)
+
+
+@router.post("/scaffold/{idx}")
+def scaffold_request(request: Request, idx: int):
+    thread = _thread(request)
+    if thread is None:
+        return RedirectResponse("/", status_code=303)
+    try:
+        practice.request_scaffold(thread, idx)
     except practice.PracticeBusy:
         return RedirectResponse(f"/answer/{idx}?busy=1", status_code=303)
     return RedirectResponse(f"/answer/{idx}", status_code=303)

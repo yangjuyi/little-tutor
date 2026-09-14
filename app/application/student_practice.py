@@ -15,7 +15,7 @@ import app.adapters.persistence as db
 import app.adapters.session_store as session_store
 from app.adapters.checkpoint import default_checkpointer
 from app.domain.answer_template import build_template
-from app.harness.hints import build_hint
+from app.harness.hints import build_hint, build_scaffold
 from app.harness.session_graph import build_session_graph
 
 
@@ -242,6 +242,7 @@ def load_answer(thread_id: str, idx: int) -> dict:
         return {"kind": "review"}
     question = questions[idx]
     hint_level = int(values.get("hint_level") or 0)
+    scaffold_level = int(values.get("scaffold_level") or 0)
     return {
         "kind": "answer",
         "idx": idx,
@@ -249,6 +250,8 @@ def load_answer(thread_id: str, idx: int) -> dict:
         "question": question,
         "hint_level": hint_level,
         "hint": build_hint(question, hint_level),
+        "scaffold_level": scaffold_level,
+        "scaffold": build_scaffold(question, scaffold_level),
         "blanks": (
             build_template(question["params"])["blanks"]
             if question.get("params") else []
@@ -267,6 +270,20 @@ def request_hint(thread_id: str, idx: int, max_level: int = 3) -> int:
     with _session_guard(thread_id):
         level = min(max_level, int(values.get("hint_level") or 0) + 1)
         graph.update_state(config, {"hint_level": level})
+    return level
+
+
+def request_scaffold(thread_id: str, idx: int, max_level: int = 2) -> int:
+    """为当前未完成题提升一级脚手架，返回新的脚手架等级。"""
+    graph = _get_graph()
+    config = _config(thread_id)
+    values = graph.get_state(config).values
+    answered = len(values.get("round_results") or [])
+    if idx != answered:
+        return int(values.get("scaffold_level") or 0)
+    with _session_guard(thread_id):
+        level = min(max_level, int(values.get("scaffold_level") or 0) + 1)
+        graph.update_state(config, {"scaffold_level": level})
     return level
 
 
@@ -316,6 +333,12 @@ def submit_answer(
         question = questions[idx]
         template, steps = _build_student_steps(question, form_data)
         hint_count = int(values.get("hint_level") or 0)
+        scaffold_level = int(values.get("scaffold_level") or 0)
+        assistance_level = (
+            "scaffolded" if scaffold_level > 0
+            else "hinted" if hint_count > 0
+            else "independent"
+        )
         _get_graph().invoke(
             {
                 "student_id": values["student_id"],
@@ -324,11 +347,9 @@ def submit_answer(
                 "template": template,
                 "student_steps": steps,
                 "attempt_no": 1,
-                "assistance_level": (
-                    "hinted" if hint_count > 0 else "independent"
-                ),
+                "assistance_level": assistance_level,
                 "hint_count": hint_count,
-                "scaffold_level": 0,
+                "scaffold_level": scaffold_level,
                 "phase": "grade_round",
             },
             _config(thread_id),

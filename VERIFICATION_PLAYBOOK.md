@@ -135,6 +135,10 @@ Get-FileHash .\checkpoints.db
 
 - 连续点击三次“需要提示”；
 - 确认提示不泄露最终答案；
+- 至少请求一次“还是不会，给我分步帮助”，确认分步帮助只给当前步骤方法，
+  不显示最终答案；
+- 提交后确认 `scaffold_level > 0`、`assistance_level=scaffolded`、
+  `evidence_weight=0.25`；
 - 刷新页面后当前题和提示等级不丢失；
 - 后退到已答题不能重复提交；
 - 快速双击提交按钮只产生一条作答记录；

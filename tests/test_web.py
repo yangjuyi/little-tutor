@@ -263,6 +263,32 @@ class TestWebFlow(unittest.TestCase):
             self.assertEqual(answer.hint_count, 1)
             self.assertEqual(answer.assistance_level, "hinted")
 
+    def test_scaffold_is_recorded_and_enters_evidence_chain(self):
+        with patch.object(sg, "grade_question", return_value=self._fake_grade()):
+            self.client.post("/start", data={"count": "2"})
+            self.client.post(
+                "/teacher/review", data={"decision": "approve"}
+            )
+            resp = self.client.post("/hint/0", follow_redirects=False)
+            self.assertEqual(resp.headers["location"], "/answer/0")
+            page = self.client.get("/answer/0")
+            self.assertIn("还是不会，给我分步帮助", page.text)
+            resp = self.client.post("/scaffold/0", follow_redirects=False)
+            self.assertEqual(resp.headers["location"], "/answer/0")
+            page = self.client.get("/answer/0")
+            self.assertIn("分步帮助 1/2", page.text)
+            data = {
+                "b1": "1", "b2": "-6", "b3": "6.25", "b4": "0.25",
+                "b5": "2", "b6": "3",
+            }
+            self.client.post("/answer/0", data=data)
+        with self.session() as s:
+            answer = s.query(db.AnswerRecord).one()
+            self.assertEqual(answer.hint_count, 1)
+            self.assertEqual(answer.scaffold_level, 1)
+            self.assertEqual(answer.assistance_level, "scaffolded")
+            self.assertEqual(answer.evidence_weight, 0.25)
+
     def test_teacher_can_edit_stem_before_approval(self):
         self.client.post("/start", data={"count": "2"})
         values = student_practice.get_graph().get_state({
