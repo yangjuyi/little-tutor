@@ -92,6 +92,7 @@ TransitionCheck
   error_type
   evidence
   confidence
+  insufficient_evidence
 
 Submission
   mode              # final_answer_only / step_by_step

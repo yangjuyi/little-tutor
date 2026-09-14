@@ -15,6 +15,7 @@ pydantic>=2.0
 # --- 工具 ---
 python-dotenv>=1.0
 pytest>=8.0
+sympy>=1.14
 
 # --- 简易 Web 演示版（V2 收尾）---
 fastapi>=0.115

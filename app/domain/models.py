@@ -29,6 +29,34 @@ class StudentStep(TypedDict):
     result: str
 
 
+class StudentStepV2(TypedDict):
+    step_no: int
+    raw_latex: str
+    operation: str
+    source: Literal["typed", "template", "photo", "canvas"]
+    confidence: float
+
+
+SubmissionMode = Literal["final_answer_only", "step_by_step"]
+
+
+class Submission(TypedDict):
+    mode: SubmissionMode
+    steps: List[StudentStepV2]
+    final_answer: str
+
+
+class TransitionCheck(TypedDict):
+    from_step: int
+    to_step: int
+    is_valid: bool
+    rule: str
+    error_type: Optional[ErrorType]
+    evidence: str
+    confidence: float
+    insufficient_evidence: bool
+
+
 BlankKind = Literal["choice", "expression"]
 
 

@@ -40,6 +40,9 @@
 
 ### Added
 
+- 过程诊断垂直切片：新增 `StudentStepV2`、`Submission`、`TransitionCheck`
+  领域契约和一元一次/二次方程转换诊断器；可定位首个不成立转换、识别
+  漏根并标记过程证据不足，当前只新增领域能力与单测，尚未接入主业务链路。
 - 新增题目派生字段物化模块：答案、有效根、解析和语义验证元数据统一由
   题干契约与结构化参数生成。
 - 组卷职责拆入 `app/harness/question_assembly.py`，`session_graph.py`
