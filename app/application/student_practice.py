@@ -24,6 +24,8 @@ class PracticeBusy(RuntimeError):
 
 
 _COMPILED = None
+MIN_QUESTION_COUNT = 1
+MAX_QUESTION_COUNT = 30
 
 
 def reset_runtime() -> None:
@@ -60,10 +62,20 @@ def _session_guard(thread_id: str):
 
 
 def _parse_count(raw: str) -> int:
-    try:
-        return int(raw) if raw.strip() else 10
-    except ValueError:
+    value = str(raw or "").strip()
+    if not value:
         return 10
+    try:
+        count = int(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"题量必须是 {MIN_QUESTION_COUNT}-{MAX_QUESTION_COUNT} 的整数"
+        ) from exc
+    if not (MIN_QUESTION_COUNT <= count <= MAX_QUESTION_COUNT):
+        raise ValueError(
+            f"题量必须是 {MIN_QUESTION_COUNT}-{MAX_QUESTION_COUNT} 的整数"
+        )
+    return count
 
 
 def ensure_student_kp(student_id: str | None = None) -> tuple[str, str]:
@@ -102,6 +114,7 @@ def ensure_student_kp(student_id: str | None = None) -> tuple[str, str]:
 
 def start_practice(student_id: str | None, count: str) -> dict:
     """创建并启动一场新练习。"""
+    question_count = _parse_count(count)
     resolved_student_id, kp_id = ensure_student_kp(student_id)
     thread_id = f"web-{uuid.uuid4().hex[:8]}"
     session_store.start_practice_session(
@@ -116,7 +129,7 @@ def start_practice(student_id: str | None, count: str) -> dict:
                 "kp_id": kp_id,
                 "kp_name": "配方法解一元二次方程",
                 "session_id": thread_id,
-                "question_count": _parse_count(count),
+                "question_count": question_count,
                 "phase": "assemble",
             },
             _config(thread_id),

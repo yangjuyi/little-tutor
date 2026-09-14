@@ -3,13 +3,14 @@
 <head>
 <meta charset="utf-8">
 <title>开始练习</title>
-<style>body{font-family:sans-serif;max-width:720px;margin:40px auto;padding:0 16px;color:#222}form{margin:16px 0}input,button{font-size:16px;padding:7px 10px}button{cursor:pointer;background:#1a5fb4;color:#fff;border:0;border-radius:5px}.meta{color:#66707a;font-size:14px;margin-top:24px}</style>
+<style>body{font-family:sans-serif;max-width:720px;margin:40px auto;padding:0 16px;color:#222}form{margin:16px 0}input,button{font-size:16px;padding:7px 10px}button{cursor:pointer;background:#1a5fb4;color:#fff;border:0;border-radius:5px}.meta{color:#66707a;font-size:14px;margin-top:24px}.error{color:#b3261e;font-weight:bold}</style>
 </head>
 <body>
 <h1>今天练一练</h1>
 <p>系统会根据你的作答情况调整后续题目，练习结束后由老师确认学习情况。</p>
+{% if error_message %}<p class="error">{{ error_message }}</p>{% endif %}
 <form method="post" action="/start">
-  <label>题量（默认 10）：<input name="count" placeholder="10" size="6"></label><br><br>
+  <label>题量（1-30，默认 10）：<input type="number" name="count" value="10" min="1" max="30" step="1" required size="6"></label><br><br>
   <button type="submit">开始练习</button>
 </form>
 <p class="meta"><a href="/teacher/login">老师入口</a></p>

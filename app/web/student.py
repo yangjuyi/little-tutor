@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse
+from urllib.parse import quote
 
 from app.application import student_practice as practice
 from app.web.dependencies import templates
@@ -17,7 +18,13 @@ def _thread(request: Request) -> str | None:
 
 @router.get("/")
 def index(request: Request):
-    return templates.TemplateResponse(request, "index.html")
+    return templates.TemplateResponse(
+        request,
+        "index.html",
+        {
+            "error_message": request.query_params.get("error", ""),
+        },
+    )
 
 
 @router.post("/start")
@@ -28,6 +35,10 @@ def start(request: Request, count: str = Form("")):
         )
     except practice.PracticeBusy:
         return RedirectResponse("/", status_code=303)
+    except ValueError as exc:
+        return RedirectResponse(
+            f"/?error={quote(str(exc))}", status_code=303
+        )
     response = RedirectResponse("/teacher/review", status_code=303)
     response.set_cookie(
         "student_id", result["student_id"], httponly=True, samesite="lax"

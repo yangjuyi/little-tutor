@@ -60,7 +60,7 @@ copy .env.example .env          # 编辑 .env 填入 API Key
 # 4. 初始化数据库
 python -m app.adapters.persistence
 
-# 5. 跑单元测试（195 项，全程离线）
+# 5. 跑单元测试（198 项，全程离线）
 python -m unittest discover -s tests -v
 
 # 6. 启动会话制命令行（组卷预审→连续作答×N→批量画像确认，一次会话打断 ≤2 次）
@@ -88,7 +88,7 @@ little-tutor/
 │   ├── build_knowledge_base.py
 │   └── generated/           # 生成的知识卡片 JSON
 ├── scripts/                 # 手动冒烟脚本（调真实 LLM，不进自动化测试）
-└── tests/                   # 195 项单元测试（含 HITL 分流守护 + 落库行为测试）
+└── tests/                   # 198 项单元测试（含 HITL 分流守护 + 落库行为测试）
 ```
 
 ## 开发路线

@@ -13,6 +13,7 @@ from app.adapters.llm import (
     _render_prompt,
     get_llm,
 )
+from app.application.student_practice import _parse_count
 from app.domain.grading import (
     DIFFICULTY_RATIOS,
     pick_difficulty,
@@ -104,6 +105,22 @@ class TestRuntimeIsolation(unittest.TestCase):
                 result.stdout.strip().splitlines(),
                 [str(db_path), str(checkpoint_path)],
             )
+
+
+class TestQuestionCountParsing(unittest.TestCase):
+    """题量必须是 1-30 的整数，空值按默认 10 处理。"""
+
+    def test_default_and_boundary_counts(self):
+        self.assertEqual(_parse_count(""), 10)
+        self.assertEqual(_parse_count(" 4 "), 4)
+        self.assertEqual(_parse_count("1"), 1)
+        self.assertEqual(_parse_count("30"), 30)
+
+    def test_invalid_counts_are_rejected(self):
+        for raw in ("-1", "0", "abc", "1.5", "31"):
+            with self.subTest(raw=raw):
+                with self.assertRaises(ValueError):
+                    _parse_count(raw)
 
 
 if __name__ == "__main__":

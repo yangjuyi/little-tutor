@@ -184,6 +184,23 @@ class TestWebFlow(unittest.TestCase):
             self.assertTrue(answer.first_attempt_correct)
             self.assertEqual(answer.assistance_level, "independent")
 
+    def test_start_rejects_invalid_question_count(self):
+        for raw in ("-1", "0", "abc", "31"):
+            with self.subTest(count=raw):
+                resp = self.client.post(
+                    "/start",
+                    data={"count": raw},
+                    follow_redirects=False,
+                )
+                self.assertEqual(resp.status_code, 303)
+                self.assertTrue(
+                    resp.headers["location"].startswith("/?error=")
+                )
+        with self.session() as s:
+            self.assertEqual(s.query(db.PracticeSessionRecord).count(), 0)
+        page = self.client.get("/?error=题量必须是 1-30 的整数")
+        self.assertIn("题量必须是 1-30 的整数", page.text)
+
     def test_full_flow_reject_keeps_mastery_clean(self):
         with patch.object(sg, "grade_question", return_value=self._fake_grade()):
             done = self._full_flow("reject")
