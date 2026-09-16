@@ -23,6 +23,8 @@ data/private_questions/
 practice/
 MAINTAINERS.md
 outputs/playwright/
+outputs/evals/
+outputs/private_sources/
 .playwright-cli/
 scripts/enable_memory_write.ps1
 scripts/memory_notes/
