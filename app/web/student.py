@@ -39,7 +39,7 @@ def start(request: Request, count: str = Form("")):
         return RedirectResponse(
             f"/?error={quote(str(exc))}", status_code=303
         )
-    response = RedirectResponse("/teacher/review", status_code=303)
+    response = RedirectResponse("/waiting", status_code=303)
     response.set_cookie(
         "student_id", result["student_id"], httponly=True, samesite="lax"
     )
@@ -47,6 +47,27 @@ def start(request: Request, count: str = Form("")):
         "thread_id", result["thread_id"], httponly=True, samesite="lax"
     )
     return response
+
+
+@router.get("/waiting")
+def waiting_page(request: Request):
+    thread = _thread(request)
+    if thread is None:
+        return RedirectResponse("/", status_code=303)
+    view = practice.load_review(thread)
+    if view["kind"] == "redirect_answer":
+        return RedirectResponse(
+            f"/answer/{view['answered']}", status_code=303
+        )
+    if view["kind"] == "error":
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            {"message": view["message"], "retry_url": "/waiting"},
+        )
+    if view["kind"] in ("review", "waiting"):
+        return templates.TemplateResponse(request, "waiting.html", {})
+    return RedirectResponse("/", status_code=303)
 
 
 @router.get("/answer/{idx}")
@@ -103,9 +124,19 @@ async def answer_post(request: Request, idx: int):
         )
     except practice.PracticeBusy:
         return RedirectResponse(f"/answer/{idx}?busy=1", status_code=303)
-    if next_idx != idx + 1:
-        return RedirectResponse(f"/answer/{next_idx}", status_code=303)
-    return RedirectResponse(f"/feedback/{idx}", status_code=303)
+    return RedirectResponse(f"/answer/{next_idx}", status_code=303)
+
+
+@router.post("/skip/{idx}")
+def skip_question(request: Request, idx: int):
+    thread = _thread(request)
+    if thread is None:
+        return RedirectResponse("/", status_code=303)
+    try:
+        next_idx = practice.skip_answer(thread, idx)
+    except practice.PracticeBusy:
+        return RedirectResponse(f"/answer/{idx}?busy=1", status_code=303)
+    return RedirectResponse(f"/answer/{next_idx}", status_code=303)
 
 
 @router.get("/feedback/{idx}")
@@ -155,8 +186,25 @@ def summarize_trigger(request: Request):
     try:
         practice.trigger_summary(thread)
     except practice.PracticeBusy:
-        return RedirectResponse("/teacher/summary", status_code=303)
-    return RedirectResponse("/teacher/summary", status_code=303)
+        return RedirectResponse("/waiting-confirmation", status_code=303)
+    return RedirectResponse("/waiting-confirmation", status_code=303)
+
+
+@router.get("/waiting-confirmation")
+def waiting_confirmation(request: Request):
+    thread = _thread(request)
+    if thread is None:
+        return RedirectResponse("/", status_code=303)
+    view = practice.load_summary(thread)
+    if view["kind"] == "error":
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            {"message": view["message"], "retry_url": "/waiting-confirmation"},
+        )
+    if view["kind"] == "done":
+        return RedirectResponse("/done", status_code=303)
+    return templates.TemplateResponse(request, "confirmation_wait.html", {})
 
 
 @router.get("/result/{idx}")

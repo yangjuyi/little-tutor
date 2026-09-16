@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import uuid
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -81,6 +82,14 @@ def _parse_count(raw: str) -> int:
 def ensure_student_kp(student_id: str | None = None) -> tuple[str, str]:
     """解析长期学生身份和当前主知识点，缺失时按演示口径创建。"""
     db.init_db()
+    if os.getenv("TUTOR_LOAD_SEED_CATALOG", "1") != "0":
+        from app.adapters.seed_catalog import (
+            load_private_questions,
+            load_seed_questions,
+        )
+
+        load_seed_questions()
+        load_private_questions()
     with db.SessionLocal() as s:
         student = None
         if student_id:
@@ -147,6 +156,10 @@ def load_review(thread_id: str) -> dict:
         if task is None:
             return {"kind": "waiting"}
         payload = task.interrupts[0].value
+        if "candidates" not in payload:
+            if "proposals" in payload:
+                return {"kind": "redirect_summary"}
+            return {"kind": "waiting"}
         ratios = snap.values.get("difficulty_ratios") or {
             "simple": 40,
             "mid": 40,
@@ -179,6 +192,84 @@ def resume_review(thread_id: str, decision: str) -> dict:
         "kind": "answer",
         "answered": len(snap.values.get("round_results") or []),
     }
+
+
+def load_review_done(thread_id: str) -> dict:
+    """读取老师预审完成页状态；已完成会话不依赖 H1 候选负载。"""
+    snap = _get_graph().get_state(_config(thread_id))
+    if snap.next:
+        task = next((task for task in snap.tasks if task.interrupts), None)
+        if task is not None:
+            payload = task.interrupts[0].value or {}
+            if "candidates" in payload:
+                return {"kind": "review"}
+    return {"kind": "done"}
+
+
+def _teacher_session_state(session_id: str) -> tuple[str, dict]:
+    """返回老师视角的会话状态和 LangGraph 快照。"""
+    snap = _get_graph().get_state(_config(session_id))
+    if snap.next:
+        task = next((task for task in snap.tasks if task.interrupts), None)
+        if task is not None:
+            payload = task.interrupts[0].value or {}
+            if "candidates" in payload:
+                return "pending_review", snap.values
+            if "proposals" in payload:
+                return "pending_confirmation", snap.values
+    if snap.values.get("phase") == "done":
+        return "done", snap.values
+    if snap.values.get("phase") == "answer":
+        return "in_progress", snap.values
+    return "waiting", snap.values
+
+
+def list_teacher_sessions(limit: int = 50) -> list[dict]:
+    """老师待办列表，不依赖学生浏览器 Cookie。"""
+    db.init_db()
+    with db.SessionLocal() as s:
+        rows = (
+            s.query(db.PracticeSessionRecord)
+            .order_by(db.PracticeSessionRecord.started_at.desc())
+            .limit(limit)
+            .all()
+        )
+        students = {
+            row.id: row.name for row in s.query(db.Student).all()
+        }
+        knowledge_points = {
+            row.id: row.kp_name for row in s.query(db.KnowledgePoint).all()
+        }
+    sessions = []
+    for row in rows:
+        state, values = _teacher_session_state(row.session_id)
+        rounds = list(values.get("round_results") or [])
+        total = int(values.get("question_count") or 0)
+        sessions.append({
+            "session_id": row.session_id,
+            "student_name": students.get(row.student_id, f"学生 {row.student_id}"),
+            "kp_name": knowledge_points.get(row.kp_id, f"知识点 {row.kp_id}"),
+            "state": state,
+            "status": row.status,
+            "review_status": row.review_status,
+            "data_source": row.data_source,
+            "answered": len(rounds),
+            "total": total,
+            "started_at": row.started_at,
+        })
+    return sessions
+
+
+def teacher_session_entry(session_id: str) -> str:
+    """老师选中会话后的目标页面类型。"""
+    state, _ = _teacher_session_state(session_id)
+    return {
+        "pending_review": "review",
+        "in_progress": "summary",
+        "pending_confirmation": "summary",
+        "done": "done",
+        "waiting": "summary",
+    }[state]
 
 
 def swap_question(thread_id: str, number: str) -> None:
@@ -370,6 +461,35 @@ def submit_answer(
     return idx + 1
 
 
+def skip_answer(thread_id: str, idx: int) -> int:
+    """学生明确选择跳过：记录未作答事实，不做 AI 归因，进入下一题。"""
+    values = _get_graph().get_state(_config(thread_id)).values
+    questions = values.get("approved_questions") or []
+    total = len(questions)
+    answered = len(values.get("round_results") or [])
+    if idx != answered or idx >= total:
+        return total if answered >= total else answered
+    with _session_guard(thread_id):
+        question = questions[idx]
+        _get_graph().invoke(
+            {
+                "student_id": values["student_id"],
+                "session_id": values.get("session_id"),
+                "current_question": question,
+                "template": None,
+                "student_steps": [],
+                "attempt_no": 1,
+                "assistance_level": "skipped",
+                "hint_count": int(values.get("hint_level") or 0),
+                "scaffold_level": int(values.get("scaffold_level") or 0),
+                "skip": True,
+                "phase": "grade_round",
+            },
+            _config(thread_id),
+        )
+    return idx + 1
+
+
 def load_feedback(thread_id: str, idx: int) -> dict | None:
     """读取单题提交后的程序事实，不包含 AI 归因和老师结论。"""
     values = _get_graph().get_state(_config(thread_id)).values
@@ -381,24 +501,21 @@ def load_feedback(thread_id: str, idx: int) -> dict | None:
     error = result.get("error") or {}
     breakpoint = error.get("program_breakpoint")
     if not breakpoint and not result.get("is_correct"):
-        wrong_blank = next(
-            (
-                blank
-                for blank in (result.get("blank_results") or [])
-                if not blank.get("is_correct")
-            ),
-            None,
-        )
-        if wrong_blank:
-            breakpoint = (
-                f"程序定位断点：{wrong_blank['blank_id']}"
-                f"（{wrong_blank['basis']}）"
-            )
+        from app.domain.answer_template import breakpoint_label
+
+        label = breakpoint_label(result.get("blank_results") or [])
+        if label:
+            breakpoint = f"程序定位断点：{label}"
     total = int(values.get("question_count") or len(questions))
     return {
         "idx": idx,
         "total": total,
         "is_correct": result["is_correct"],
+        "final_answer_correct": result.get(
+            "final_answer_correct", result["is_correct"]
+        ),
+        "process_correct": result.get("process_correct", True),
+        "assistance_level": result.get("assistance_level", "independent"),
         "stem": questions[idx]["stem"] if idx < total else "",
         "breakpoint": breakpoint,
         "next_idx": idx + 1,

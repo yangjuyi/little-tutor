@@ -18,8 +18,12 @@ body{font-family:sans-serif;max-width:760px;margin:0 auto;padding:20px 16px;back
 <body>
 <p class="note">第 {{ idx + 1 }} / {{ total }} 题</p>
 <div class="card">
-  {% if is_correct %}
+  {% if assistance_level == "skipped" %}
+  <div class="status bad">本题已跳过：未形成作答证据</div>
+  {% elif is_correct %}
   <div class="status ok">程序判分：正确</div>
+  {% elif final_answer_correct and not process_correct %}
+  <div class="status bad">过程错误：最终答案正确，但中间步骤有错误</div>
   {% else %}
   <div class="status bad">程序判分：错误</div>
   {% endif %}

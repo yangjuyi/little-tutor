@@ -19,7 +19,8 @@ button{margin-top:14px;background:#1a5fb4;color:#fff;border:0;border-radius:5px;
   <h1>老师入口</h1>
   {% if required_token %}
   <p>请输入老师访问令牌。</p>
-  {% if error %}<p class="error">令牌不正确，请重试。</p>{% endif %}
+  {% if locked %}<p class="error">尝试次数过多，请 {{ lock_seconds }} 秒后再试。</p>
+  {% elif error %}<p class="error">令牌不正确，请重试。</p>{% endif %}
   <form method="post" action="/teacher/login">
     <label for="token">访问令牌</label>
     <input id="token" name="token" type="password" autocomplete="current-password" required>

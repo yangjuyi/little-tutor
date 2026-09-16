@@ -8,6 +8,7 @@
 <body>
 <h1>会话中断</h1>
 <div class="box">{{ message }}</div>
-<p>请检查 LLM 配置 / 网络后，<a href="/">用原会话 ID 重开</a>（checkpointer 已保存进度）。</p>
+<p>请检查 LLM 配置或网络，然后<a href="{{ retry_url or '/teacher/review' }}">重试当前老师页面</a>。
+本次会话进度已保存，请不要清理浏览器 Cookie。</p>
 </body>
 </html>

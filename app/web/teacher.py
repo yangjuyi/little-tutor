@@ -8,7 +8,17 @@ from fastapi.responses import RedirectResponse
 
 from app.application import student_practice as practice
 from app.domain.types import ERROR_TYPE_OPTIONS
-from app.web.auth import TEACHER_COOKIE, teacher_cookie_value, teacher_redirect
+from app.web.auth import (
+    TEACHER_COOKIE,
+    TEACHER_THREAD_COOKIE,
+    LOGIN_LOCK_SECONDS,
+    clear_teacher_login_failures,
+    record_teacher_login_failure,
+    teacher_client_key,
+    teacher_cookie_value,
+    teacher_login_locked,
+    teacher_redirect,
+)
 from app.web.dependencies import templates
 
 
@@ -16,7 +26,10 @@ router = APIRouter()
 
 
 def _thread(request: Request) -> str | None:
-    return request.cookies.get("thread_id")
+    return (
+        request.cookies.get(TEACHER_THREAD_COOKIE)
+        or request.cookies.get("thread_id")
+    )
 
 
 @router.get("/teacher/login")
@@ -26,6 +39,8 @@ def teacher_login_page(request: Request):
         "teacher_login.html",
         {
             "error": request.query_params.get("error") == "1",
+            "locked": request.query_params.get("error") == "locked",
+            "lock_seconds": LOGIN_LOCK_SECONDS,
             "required_token": bool(
                 os.getenv("TUTOR_TEACHER_TOKEN", "").strip()
             ),
@@ -34,17 +49,68 @@ def teacher_login_page(request: Request):
 
 
 @router.post("/teacher/login")
-def teacher_login(token: str = Form("")):
+def teacher_login(request: Request, token: str = Form("")):
     expected = os.getenv("TUTOR_TEACHER_TOKEN", "").strip()
     if not expected:
         response = RedirectResponse("/teacher/review", status_code=303)
         return response
+    client_key = teacher_client_key(request)
+    if teacher_login_locked(client_key):
+        return RedirectResponse("/teacher/login?error=locked", status_code=303)
     if token.strip() != expected:
-        return RedirectResponse("/teacher/login?error=1", status_code=303)
-    response = RedirectResponse("/teacher/review", status_code=303)
+        locked = record_teacher_login_failure(client_key)
+        query = "locked" if locked else "1"
+        return RedirectResponse(
+            f"/teacher/login?error={query}", status_code=303
+        )
+    clear_teacher_login_failures(client_key)
+    target = "/teacher/sessions"
+    response = RedirectResponse(target, status_code=303)
     response.set_cookie(
         TEACHER_COOKIE,
         teacher_cookie_value(expected),
+        httponly=True,
+        samesite="lax",
+    )
+    return response
+
+
+@router.get("/teacher/sessions")
+def teacher_sessions_page(request: Request):
+    redirect = teacher_redirect(request)
+    if redirect:
+        return redirect
+    return templates.TemplateResponse(
+        request,
+        "teacher_sessions.html",
+        {
+            "sessions": practice.list_teacher_sessions(),
+            "state_labels": {
+                "pending_review": "待预审",
+                "in_progress": "答题中",
+                "pending_confirmation": "待画像确认",
+                "done": "已完成",
+                "waiting": "处理中",
+            },
+        },
+    )
+
+
+@router.get("/teacher/session/{session_id}")
+def select_teacher_session(request: Request, session_id: str):
+    redirect = teacher_redirect(request)
+    if redirect:
+        return redirect
+    entry = practice.teacher_session_entry(session_id)
+    target = {
+        "review": "/teacher/review",
+        "summary": "/teacher/summary",
+        "done": "/done",
+    }[entry]
+    response = RedirectResponse(target, status_code=303)
+    response.set_cookie(
+        TEACHER_THREAD_COOKIE,
+        session_id,
         httponly=True,
         samesite="lax",
     )
@@ -62,7 +128,9 @@ def review_page(request: Request):
     view = practice.load_review(thread)
     if view["kind"] == "error":
         return templates.TemplateResponse(
-            request, "error.html", {"message": view["message"]}
+            request,
+            "error.html",
+            {"message": view["message"], "retry_url": "/teacher/review"},
         )
     if view["kind"] == "waiting":
         return templates.TemplateResponse(
@@ -87,9 +155,9 @@ def review_page(request: Request):
             },
         )
     if view["kind"] == "redirect_answer":
-        return RedirectResponse(
-            f"/answer/{view['answered']}", status_code=303
-        )
+        return RedirectResponse("/teacher/review-done", status_code=303)
+    if view["kind"] == "redirect_summary":
+        return RedirectResponse("/teacher/summary", status_code=303)
     return RedirectResponse("/", status_code=303)
 
 
@@ -107,7 +175,21 @@ def review_post(request: Request, decision: str = Form("")):
         return RedirectResponse("/teacher/review?busy=1", status_code=303)
     if view["kind"] == "review":
         return RedirectResponse("/teacher/review", status_code=303)
-    return RedirectResponse(f"/answer/{view['answered']}", status_code=303)
+    return RedirectResponse("/teacher/review-done", status_code=303)
+
+
+@router.get("/teacher/review-done")
+def review_done_page(request: Request):
+    redirect = teacher_redirect(request)
+    if redirect:
+        return redirect
+    thread = _thread(request)
+    if thread is None:
+        return RedirectResponse("/", status_code=303)
+    view = practice.load_review_done(thread)
+    if view["kind"] == "review":
+        return RedirectResponse("/teacher/review", status_code=303)
+    return templates.TemplateResponse(request, "review_done.html", {})
 
 
 @router.post("/teacher/review/swap")
@@ -184,7 +266,9 @@ def summary_page(request: Request):
     view = practice.load_summary(thread)
     if view["kind"] == "error":
         return templates.TemplateResponse(
-            request, "error.html", {"message": view["message"]}
+            request,
+            "error.html",
+            {"message": view["message"], "retry_url": "/teacher/summary"},
         )
     if view["kind"] == "summary":
         return templates.TemplateResponse(
@@ -198,8 +282,8 @@ def summary_page(request: Request):
             },
         )
     if view["kind"] == "done":
-        return RedirectResponse("/done", status_code=303)
-    return RedirectResponse("/", status_code=303)
+        return RedirectResponse("/teacher/completed", status_code=303)
+    return templates.TemplateResponse(request, "summary_wait.html", {})
 
 
 @router.post("/teacher/summary")
@@ -235,4 +319,12 @@ async def summary_post(request: Request):
         )
     except practice.PracticeBusy:
         return RedirectResponse("/teacher/summary?busy=1", status_code=303)
-    return RedirectResponse("/done", status_code=303)
+    return RedirectResponse("/teacher/completed", status_code=303)
+
+
+@router.get("/teacher/completed")
+def teacher_completed_page(request: Request):
+    redirect = teacher_redirect(request)
+    if redirect:
+        return redirect
+    return templates.TemplateResponse(request, "teacher_completed.html", {})

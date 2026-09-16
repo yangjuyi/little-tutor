@@ -5,12 +5,77 @@ from __future__ import annotations
 import os
 import hashlib
 import hmac
+import threading
+import time
+from collections import defaultdict
 
 from fastapi import Request
 from fastapi.responses import RedirectResponse
 
 
 TEACHER_COOKIE = "teacher_token"
+TEACHER_THREAD_COOKIE = "teacher_thread_id"
+MAX_LOGIN_FAILURES = 5
+LOGIN_WINDOW_SECONDS = 300
+LOGIN_LOCK_SECONDS = 30
+
+_login_failures: dict[str, list[float]] = defaultdict(list)
+_login_locked_until: dict[str, float] = {}
+_login_lock = threading.Lock()
+
+
+def reset_teacher_login_attempts() -> None:
+    """清空令牌失败计数，供测试与进程级重载使用。"""
+    with _login_lock:
+        _login_failures.clear()
+        _login_locked_until.clear()
+
+
+def teacher_login_locked(client_key: str) -> bool:
+    """同一来源在窗口期内失败过多时暂时锁定。"""
+    now = time.monotonic()
+    with _login_lock:
+        locked_until = _login_locked_until.get(client_key, 0.0)
+        if locked_until > now:
+            return True
+        if locked_until:
+            _login_locked_until.pop(client_key, None)
+            _login_failures.pop(client_key, None)
+        attempts = [
+            value
+            for value in _login_failures.get(client_key, [])
+            if now - value < LOGIN_WINDOW_SECONDS
+        ]
+        _login_failures[client_key] = attempts
+        return False
+
+
+def record_teacher_login_failure(client_key: str) -> bool:
+    """记录一次失败，并返回记录后是否已触发锁定。"""
+    now = time.monotonic()
+    with _login_lock:
+        attempts = [
+            value
+            for value in _login_failures.get(client_key, [])
+            if now - value < LOGIN_WINDOW_SECONDS
+        ]
+        attempts.append(now)
+        if len(attempts) >= MAX_LOGIN_FAILURES:
+            _login_locked_until[client_key] = now + LOGIN_LOCK_SECONDS
+            _login_failures[client_key] = []
+            return True
+        _login_failures[client_key] = attempts
+        return False
+
+
+def clear_teacher_login_failures(client_key: str) -> None:
+    with _login_lock:
+        _login_failures.pop(client_key, None)
+        _login_locked_until.pop(client_key, None)
+
+
+def teacher_client_key(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 def teacher_cookie_value(token: str) -> str:

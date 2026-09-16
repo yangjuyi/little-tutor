@@ -22,6 +22,17 @@ def build_done_context(values: dict) -> dict:
     total = len(rounds)
     correct = sum(1 for result in rounds if result.get("is_correct"))
     wrong = total - correct
+    process_error_count = sum(
+        1
+        for result in rounds
+        if result.get("final_answer_correct")
+        and not result.get("process_correct", True)
+    )
+    skipped_count = sum(
+        1
+        for result in rounds
+        if (result.get("assistance_level") or "") == "skipped"
+    )
     session_rate = correct / total if total else 0.0
 
     error_counts = {error_type: 0 for error_type in _ERROR_TYPES}
@@ -63,6 +74,8 @@ def build_done_context(values: dict) -> dict:
         "total": total,
         "correct": correct,
         "wrong": wrong,
+        "process_error_count": process_error_count,
+        "skipped_count": skipped_count,
         "session_rate": session_rate,
         "mastery_level": mastery_level,
         "mastery_label": _MASTERY_LABELS[mastery_level],

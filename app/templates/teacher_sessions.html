@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>老师工作台</title>
+<style>
+body{font-family:sans-serif;max-width:980px;margin:0 auto;padding:24px 18px;background:#f5f6f8;color:#222}
+.card{background:#fff;border:1px solid #dfe3e7;border-radius:8px;padding:14px 16px;margin:12px 0}
+.meta{color:#66707a;font-size:14px}
+.badge{display:inline-block;padding:3px 8px;border-radius:10px;background:#eef4ff;color:#1a5fb4;font-size:13px}
+.actions{margin-top:10px}
+a.btn{display:inline-block;text-decoration:none;background:#1a5fb4;color:#fff;border-radius:5px;padding:8px 12px}
+.empty{color:#66707a}
+</style>
+</head>
+<body>
+<h1>老师工作台</h1>
+<p class="meta">这里显示本机保存的最近练习会话，可跨设备选择要处理的会话。</p>
+{% if sessions %}
+{% for item in sessions %}
+<div class="card">
+  <div><span class="badge">{{ state_labels.get(item.state, item.state) }}</span>
+    <b>{{ item.student_name }}</b> · {{ item.kp_name }}</div>
+  <div class="meta">{{ item.session_id }} · {{ item.answered }}/{{ item.total }} 题 · {{ item.started_at }}</div>
+  <div class="actions"><a class="btn" href="/teacher/session/{{ item.session_id }}">打开会话</a></div>
+</div>
+{% endfor %}
+{% else %}
+<div class="card empty">暂无练习会话。</div>
+{% endif %}
+</body>
+</html>

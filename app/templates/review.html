@@ -29,6 +29,8 @@ button.primary{background:#1a5fb4;color:#fff;border:0;width:100%;padding:10px;fo
 </head>
 <body>
 <h1>组卷预审 <span class="meta">（老师：确认题目后学生开做）</span></h1>
+<p class="meta"><a href="/teacher/sessions">切换会话</a></p>
+<p class="meta">修改题干后，题干中的数字必须与右侧 a / b / c 同步，否则程序会提示“题干与参数冲突”。</p>
 {% if waiting %}
 <div class="card"><b>AI 正在按你的要求生成新题…（约 10~30 秒）</b><br>
 <span class="meta">本页每 3 秒自动刷新，生成完成后会自动显示新题目。</span></div>
@@ -60,11 +62,19 @@ button.primary{background:#1a5fb4;color:#fff;border:0;width:100%;padding:10px;fo
       <input type="hidden" name="no" value="{{ c.index }}">
       <textarea name="stem" rows="3" style="width:100%;box-sizing:border-box;margin:6px 0">{{ c.stem }}</textarea>
       <div class="meta" style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0">
-        <label>a <input type="number" step="any" name="a" value="{{ c.params.a }}" required style="width:70px"></label>
-        <label>b <input type="number" step="any" name="b" value="{{ c.params.b }}" required style="width:80px"></label>
-        <label>c <input type="number" step="any" name="c" value="{{ c.params.c }}" required style="width:80px"></label>
-        <label>结构标记 <input type="text" name="structure_tag" value="{{ c.params.structure_tag or '' }}" style="width:110px"></label>
+        <label>二次项系数 a <input type="number" step="any" name="a" value="{{ c.params.a }}" required style="width:70px"></label>
+        <label>一次项系数 b <input type="number" step="any" name="b" value="{{ c.params.b }}" required style="width:80px"></label>
+        <label>常数项 c <input type="number" step="any" name="c" value="{{ c.params.c }}" required style="width:80px"></label>
+        <label>题目结构
+          <select name="structure_tag" style="width:130px">
+            <option value="" {% if not c.params.structure_tag %}selected{% endif %}>直接求解</option>
+            <option value="建模" {% if c.params.structure_tag == "建模" %}selected{% endif %}>情境建模</option>
+            <option value="根与系数" {% if c.params.structure_tag == "根与系数" %}selected{% endif %}>根与系数</option>
+            <option value="多步化简" {% if c.params.structure_tag == "多步化简" %}selected{% endif %}>多步化简</option>
+          </select>
+        </label>
       </div>
+      <div class="meta">题目结构用于决定解析和校验方式，不是学生答案；不确定时保持原值。</div>
       <button type="submit">保存并重新计算</button>
     </form>
   </div>

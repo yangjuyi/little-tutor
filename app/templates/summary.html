@@ -22,6 +22,7 @@ button{font-size:16px;padding:9px 14px;border-radius:5px;cursor:pointer}
 </head>
 <body>
 <h1>本次练习结果确认</h1>
+<p><a href="/teacher/sessions">切换会话</a></p>
 <p>系统根据本次练习表现，建议更新该知识点的掌握程度。请老师确认是否写入学生画像。</p>
 <form method="post" action="/teacher/summary">
 {% for p in proposals %}
@@ -64,7 +65,13 @@ button{font-size:16px;padding:9px 14px;border-radius:5px;cursor:pointer}
   <div class="row">
     <span class="label">第 {{ loop.index }} 题</span>
     <b class="{{ 'ok' if result.is_correct else 'bad' }}">
-      {{ '程序判定正确' if result.is_correct else '程序判定错误' }}
+      {% if result.is_correct %}
+      程序判定正确
+      {% elif result.final_answer_correct and not result.process_correct %}
+      过程有错误（最终答案正确）
+      {% else %}
+      程序判定错误
+      {% endif %}
     </b>
   </div>
   <div style="margin:8px 0;color:#444">{{ questions[loop.index0].stem }}</div>

@@ -31,7 +31,13 @@ label.opt input{margin-right:8px;transform:scale(1.2)}
 button.submit{width:100%;background:#1a5fb4;color:#fff;border:0;border-radius:6px;padding:12px;font-size:16px;font-weight:bold;cursor:pointer}
 button.submit:hover{background:#174f96}
 button.submit.secondary{background:#eef4ff;color:#1a5fb4;border:1px solid #1a5fb4}
+button.submit.skip{background:#fff;color:#66707a;border:1px solid #c9ccd1;margin-top:8px}
 details.meta summary{cursor:pointer}
+@media(max-width:1200px){
+  body{padding-bottom:150px}
+  .mobile-action-bar{position:fixed;left:0;right:0;bottom:0;z-index:30;background:#f5f6f8;padding:8px 16px 12px;box-shadow:0 -3px 12px rgba(0,0,0,.10)}
+  .mobile-action-bar button.submit{margin-top:0}
+}
 </style>
 </head>
 <body>
@@ -44,6 +50,11 @@ details.meta summary{cursor:pointer}
   <b>第 {{ loop.index }} 题</b>
   {% if result.is_correct %}
     <span class="ok">程序初评正确</span>
+  {% elif result.final_answer_correct and not result.process_correct %}
+    <span class="bad">过程错误：最终答案正确，但中间步骤有错误</span>
+    {% if result.error.program_breakpoint %}
+      <div style="margin-top:6px">{{ result.error.program_breakpoint }}</div>
+    {% endif %}
   {% else %}
     <span class="bad">程序初评错误</span>
     {% if result.error.program_breakpoint %}
@@ -55,8 +66,8 @@ details.meta summary{cursor:pointer}
   <div style="margin-top:8px"><a href="/result/{{ loop.index0 }}">查看本题程序结果</a></div>
 </div>
 {% endfor %}
-<form method="post" action="/summarize">
-  <button class="submit" type="submit">进入会话汇总</button>
+<form class="mobile-action-bar" method="post" action="/summarize">
+  <button class="submit" type="submit">提交给老师确认</button>
 </form>
 {% else %}
 <div class="progress"><div style="width: {{ ((idx / total) * 100) | round(0, 'floor') }}%"></div></div>
@@ -74,9 +85,9 @@ details.meta summary{cursor:pointer}
   <div>{{ scaffold }}</div>
 </div>
 {% endif %}
-{% if hint_level > 0 and scaffold_level < 2 %}
+{% if hint_level >= 2 and scaffold_level < 2 %}
 <form method="post" action="/scaffold/{{ idx }}">
-  <button class="submit secondary" type="submit">还是不会，给我分步帮助</button>
+  <button class="submit secondary" type="submit">还是不会，升级为分步帮助</button>
 </form>
 {% endif %}
 {% if hint_level < 3 %}
@@ -84,7 +95,7 @@ details.meta summary{cursor:pointer}
   <button class="submit" type="submit">{% if hint_level %}再提示一级{% else %}需要提示{% endif %}</button>
 </form>
 {% endif %}
-<form method="post" action="/answer/{{ idx }}">
+<form id="answer-form" method="post" action="/answer/{{ idx }}" autocomplete="off">
 {% for b in blanks %}
   <div class="blank card">
     <span class="no">{{ loop.index }}</span><b>{{ b.basis }}</b><br>
@@ -93,14 +104,18 @@ details.meta summary{cursor:pointer}
         <label class="opt"><input type="radio" name="{{ b.id }}" value="{{ loop.index }}" required> {{ loop.index }}. {{ opt }}</label>
       {% endfor %}
     {% else %}
-      <input type="text" name="{{ b.id }}" placeholder="填数值（分数可写 1/2）" required>
+      <input type="text" name="{{ b.id }}" autocomplete="off" placeholder="填数值（分数可写 1/2）" required>
     {% endif %}
   </div>
 {% endfor %}
 {% if not blanks %}
-  <div class="blank card">最终作答：<input type="text" name="final_answer" placeholder="x1=1, x2=-3"></div>
+  <div class="blank card">最终作答：<input type="text" name="final_answer" autocomplete="off" placeholder="x1=1, x2=-3"></div>
 {% endif %}
-<button class="submit" type="submit">提交本题</button>
+<div class="mobile-action-bar">
+  <button class="submit" type="submit">提交本题</button>
+  <button class="submit skip" type="submit" formaction="/skip/{{ idx }}"
+          formnovalidate>这题不会，先跳过</button>
+</div>
 </form>
 <script>
 document.querySelectorAll("form").forEach(function (form) {

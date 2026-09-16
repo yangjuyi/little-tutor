@@ -58,11 +58,28 @@ canvas{display:block;width:100%;height:100%}
   <section class="card">
     <h2>错因分析</h2>
     <div class="status">本次共错 {{ wrong }} 题</div>
+    {% if process_error_count %}
+    <div class="status warn">
+      其中 {{ process_error_count }} 题最终答案正确，但过程有错误。
+      {% if h3_decision %}老师已完成确认。{% else %}待老师确认。{% endif %}
+    </div>
+    {% endif %}
+    {% if skipped_count %}
+    <div class="status warn">
+      其中 {{ skipped_count }} 题由学生主动跳过，未形成作答证据。
+    </div>
+    {% endif %}
     <div class="chart-wrap"><canvas id="errorRadar"></canvas></div>
     {% if wrong == 0 %}
     <div class="no-errors">本次没有错题，未发现集中错因。</div>
     {% elif unattributed_count == wrong %}
-    <div class="status warn">错因尚待老师确认，本次不生成自动错因结论。</div>
+    <div class="status warn">
+      {% if h3_decision %}
+      老师已确认：本次错题未形成可自动归因的证据，不生成自动错因结论。
+      {% else %}
+      错因尚待老师确认，本次不生成自动错因结论。
+      {% endif %}
+    </div>
     {% else %}
     <ul class="facts">
       {% for label, count in error_counts.items() %}
