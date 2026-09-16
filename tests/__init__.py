@@ -10,6 +10,7 @@ from pathlib import Path
 _TEST_RUNTIME_DIR = Path(tempfile.mkdtemp(prefix="little-tutor-tests-"))
 os.environ["TUTOR_DB_PATH"] = str(_TEST_RUNTIME_DIR / "tutor.db")
 os.environ["TUTOR_CHECKPOINT_PATH"] = str(_TEST_RUNTIME_DIR / "checkpoints.db")
+os.environ["TUTOR_LOAD_SEED_CATALOG"] = "0"
 
 
 def _cleanup_test_runtime() -> None:

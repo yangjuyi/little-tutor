@@ -135,7 +135,12 @@ def _run_smoke(
         )
         r = client.post(f"/answer/{idx}", data=answers, follow_redirects=False)
         assert r.status_code == 303, f"作答提交失败: {r.status_code}"
-        assert r.headers["location"] == f"/feedback/{idx}", "未进入即时反馈页"
+        next_location = (
+            f"/answer/{idx + 1}"
+            if idx + 1 < count
+            else f"/answer/{count}"
+        )
+        assert r.headers["location"] == next_location, "未连续进入下一题"
         feedback = client.get(f"/feedback/{idx}")
         result = client.get(f"/result/{idx}")
         if answer_mode == "wrong" and idx == 0:
@@ -154,6 +159,7 @@ def _run_smoke(
     t = time.time()
     r = client.post("/summarize", follow_redirects=False)
     assert r.status_code == 303, f"汇总触发失败: {r.status_code}"
+    assert r.headers["location"] == "/waiting-confirmation"
     summary = client.get("/teacher/summary")
     assert "本次练习结果确认" in summary.text, "汇总页异常"
     print(f"[5/6] 会话汇总 OK（{time.time() - t:.1f}s）")
@@ -164,6 +170,7 @@ def _run_smoke(
         follow_redirects=False,
     )
     assert r.status_code == 303
+    assert r.headers["location"] == "/teacher/completed"
     done = client.get("/done")
     if decision == "accept":
         assert "学生画像已更新" in done.text, "H3 accept 落库异常"

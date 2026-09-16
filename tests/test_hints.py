@@ -21,6 +21,8 @@ class TestHintPolicy(unittest.TestCase):
         self.assertIn("整理", first)
         self.assertIn("先完成这一步", second)
         self.assertIn("检查符号", third)
+        self.assertNotIn("？。", " ".join((first, second, third)))
+        self.assertNotIn("。。", " ".join((first, second, third)))
         self.assertNotIn("x=2", " ".join((first, second, third)))
         self.assertNotIn("x=4", " ".join((first, second, third)))
 
@@ -37,6 +39,8 @@ class TestHintPolicy(unittest.TestCase):
         second = build_scaffold(question, 2)
         self.assertIn("只写这一步", first)
         self.assertIn("拆成两步", second)
+        self.assertNotIn("？。", " ".join((first, second)))
+        self.assertNotIn("。。", " ".join((first, second)))
         self.assertNotIn("x=2", " ".join((first, second)))
         self.assertNotIn("x=4", " ".join((first, second)))
         self.assertIsNone(build_scaffold(question, 0))

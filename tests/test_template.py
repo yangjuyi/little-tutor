@@ -212,6 +212,8 @@ class TestGradeNodeTemplateMerge(unittest.TestCase):
         result = self._invoke(steps)
         self.assertEqual(len(result["blank_results"]), 6)
         self.assertNotIn("program_breakpoint", result["error"])
+        self.assertTrue(result["final_answer_correct"])
+        self.assertTrue(result["process_correct"])
 
     def test_program_breakpoint_on_wrong_blank(self):
         template = build_template({"a": 1, "b": -6, "c": 8})
@@ -222,7 +224,10 @@ class TestGradeNodeTemplateMerge(unittest.TestCase):
         answers[2] = "999"
         steps = [{"basis": f"s{i}", "result": a} for i, a in enumerate(answers)]
         result = self._invoke(steps)
-        self.assertIn("b3", result["error"]["program_breakpoint"])
+        self.assertIn("第 3 个作答项", result["error"]["program_breakpoint"])
+        self.assertFalse(result["is_correct"])
+        self.assertTrue(result["final_answer_correct"])
+        self.assertFalse(result["process_correct"])
 
 
 if __name__ == "__main__":

@@ -148,6 +148,18 @@ class TestSeedQuestions(unittest.TestCase):
             seeds.load_seed_questions(path=path)
         self.assertIn("难度带校验", str(ctx.exception))
 
+    def test_curated_question_infers_missing_design_id(self):
+        payload = json.loads(json.dumps(SEEDS))
+        payload["questions"] = [payload["questions"][0]]
+        del payload["questions"][0]["params"]["design_id"]
+        path = self._write_seeds(payload)
+        self.assertEqual(
+            seeds.load_seed_questions(path=path, curated=True), 1
+        )
+        with self.session() as s:
+            row = s.query(db.Question).one()
+            self.assertEqual(row.params["design_id"], "direct")
+
     def test_missing_kp_autocreated(self):
         path = self._write_seeds({"kp_name": "新知识点", "questions": []})
         seeds.load_seed_questions(path=path)
