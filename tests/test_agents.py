@@ -217,6 +217,25 @@ class TestGradeQuestionIntegration(unittest.TestCase):
         result = self._grade("x1=3, x2=2")
         self.assertTrue(result["is_correct"])
 
+    def test_no_steps_cannot_force_specific_error_type(self):
+        payload = {
+            "is_correct": False,
+            "error_type": "计算",
+            "confidence": 0.5,
+            "evidence": "推测计算错误",
+            "steps_analyzed": 0,
+            "insufficient_evidence": True,
+        }
+        result = grade_question(
+            dict(self.QUESTION),
+            [],
+            _FakeStructuredLLM(payload),
+        )
+        self.assertFalse(result["is_correct"])
+        self.assertEqual(result["error"]["error_type"], "未归因")
+        self.assertEqual(result["error"]["confidence"], 0.0)
+        self.assertTrue(result["error"]["insufficient_evidence"])
+
 
 class _ExplodingStructuredLLM:
     """LLM 挂掉的离线替身：结构化输出调用必炸（测全局异常兜底）"""

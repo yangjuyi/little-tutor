@@ -177,6 +177,11 @@ def grade_question(question: dict, student_steps: list, llm) -> dict:
     else:
         evidence_source = "llm"
 
+    if not student_steps and not is_correct:
+        grade.error_type = "未归因"
+        grade.confidence = 0.0
+        grade.evidence = "学生未提交任何步骤，无法定位断点"
+        grade.insufficient_evidence = True
     if is_correct and grade.error_type != "无错":
         grade.error_type = "无错"
         grade.confidence = 1.0
