@@ -50,7 +50,7 @@ Get-FileHash .\checkpoints.db
 
 预期现象：
 
-- `209` 项测试通过。
+- `224` 项测试通过。
 - 测试使用的是临时运行目录。
 - 项目根目录的 `tutor.db` / `checkpoints.db` 不发生变化。
 

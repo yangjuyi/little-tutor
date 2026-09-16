@@ -13,7 +13,7 @@
 .\.venv\Scripts\python.exe -m unittest discover -s tests -q
 ```
 
-当前基线：`209` 项通过。
+当前基线：`224` 项通过。
 
 真实浏览器 UI 验收：
 

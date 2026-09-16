@@ -7,6 +7,7 @@
 > V2 验收状态见 [V2_ACCEPTANCE.md](V2_ACCEPTANCE.md)，
 > 完整手工用例见 [V2_FULL_ACCEPTANCE_CASES.md](V2_FULL_ACCEPTANCE_CASES.md)，
 > 验证与真实体验流程见 [VERIFICATION_PLAYBOOK.md](VERIFICATION_PLAYBOOK.md)，
+> 离线评测集与指标见 [evals/README.md](evals/README.md)，
 > 产品参考见 [PRODUCT_RESEARCH.md](PRODUCT_RESEARCH.md)，
 > 版本变更见 [CHANGELOG.md](CHANGELOG.md)
 
@@ -77,7 +78,7 @@ copy .env.example .env          # 编辑 .env 填入 API Key
 # 4. 初始化数据库
 python -m app.adapters.persistence
 
-# 5. 跑单元测试（209 项，全程离线）
+# 5. 跑单元测试（224 项，全程离线）
 python -m unittest discover -s tests -v
 
 # 6. 启动会话制命令行（组卷预审→连续作答×N→批量画像确认，一次会话打断 ≤2 次）
@@ -110,8 +111,9 @@ little-tutor/
 ├── data/
 │   ├── build_knowledge_base.py
 │   └── generated/           # 生成的知识卡片 JSON
+├── evals/                    # 公开 45 条 + 可选私有题的离线评测集
 ├── scripts/                 # 手动冒烟脚本（调真实 LLM，不进自动化测试）
-└── tests/                   # 209 项单元测试（含 HITL 分流守护 + 落库行为测试）
+└── tests/                   # 224 项单元测试（含 HITL 分流守护 + 落库行为测试）
 ```
 
 ## 开发路线
