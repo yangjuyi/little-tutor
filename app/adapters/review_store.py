@@ -43,7 +43,7 @@ def record_answer(
 ) -> None:
     """作答事实无条件留痕。"""
     steps = result.get("steps") or []
-    assistance_level = (
+    assistance_level = result.get("assistance_level") or (
         "scaffolded" if scaffold_level > 0
         else "hinted" if hint_count > 0
         else "independent"

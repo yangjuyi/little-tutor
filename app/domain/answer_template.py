@@ -258,3 +258,11 @@ def judge_blanks(template: dict, student_steps: list) -> list:
 def first_wrong_blank(blank_results: list) -> dict | None:
     """断点定位：第一个判错的空；全对返回 None。"""
     return next((r for r in blank_results if not r["is_correct"]), None)
+
+
+def breakpoint_label(blank_results: list) -> str | None:
+    """给学生看的断点位置，不暴露内部空位编号。"""
+    for index, result in enumerate(blank_results, start=1):
+        if not result["is_correct"]:
+            return f"第 {index} 个作答项（{result['basis']}）"
+    return None

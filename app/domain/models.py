@@ -98,6 +98,8 @@ class ErrorAnalysis(TypedDict):
 class QuestionResult(TypedDict):
     question_id: str
     is_correct: bool
+    final_answer_correct: bool
+    process_correct: bool
     difficulty: Optional[DifficultyLevel]
     attempt_no: int
     assistance_level: str

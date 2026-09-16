@@ -12,6 +12,7 @@ ASSISTANCE_WEIGHTS = {
     "independent": 1.0,
     "hinted": 0.5,
     "scaffolded": 0.25,
+    "skipped": 0.0,
 }
 
 

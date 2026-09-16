@@ -5,6 +5,10 @@ from __future__ import annotations
 from app.domain.answer_template import build_template
 
 
+def _clean_instruction(text: str) -> str:
+    return text.rstrip("。！？；，")
+
+
 def build_hint(question: dict, level: int) -> str | None:
     """按提示等级生成不泄露最终答案的引导。"""
     if level <= 0:
@@ -25,9 +29,15 @@ def build_hint(question: dict, level: int) -> str | None:
 
     if template:
         if level == 2:
-            return f"先完成这一步：{template['blanks'][0]['basis']}"
+            return (
+                f"先完成这一步："
+                f"{_clean_instruction(template['blanks'][0]['basis'])}"
+            )
         next_blank = template["blanks"][min(2, len(template["blanks"]) - 1)]
-        return f"继续处理当前步骤：{next_blank['basis']} 检查符号和运算顺序。"
+        return (
+            f"继续处理当前步骤：{_clean_instruction(next_blank['basis'])}。"
+            "检查符号、约分和运算顺序。"
+        )
 
     return "按题意先设未知数，再建立等量关系，最后求解并检查结果是否合理。"
 
@@ -42,7 +52,8 @@ def build_scaffold(question: dict, level: int) -> str | None:
     if level == 1:
         if template and template.get("blanks"):
             return (
-                f"先完成当前步骤：{template['blanks'][0]['basis']}。"
+                f"先完成当前步骤："
+                f"{_clean_instruction(template['blanks'][0]['basis'])}。"
                 "只写这一步的完整式子，不要跳到最终答案。"
             )
         return "先把已知量和未知量分开，写出下一步要用的等量关系。"
@@ -63,8 +74,10 @@ def build_scaffold(question: dict, level: int) -> str | None:
             "每一步只做一次变形，写完当前等式再进入下一步。"
         )
     if template:
-        first = template["blanks"][0]["basis"]
-        current = template["blanks"][min(1, len(template["blanks"]) - 1)]["basis"]
+        first = _clean_instruction(template["blanks"][0]["basis"])
+        current = _clean_instruction(
+            template["blanks"][min(1, len(template["blanks"]) - 1)]["basis"]
+        )
         return (
             f"把当前步骤拆成两步：先处理“{first}”，"
             f"再处理“{current}”。每一步只写一个等式。"

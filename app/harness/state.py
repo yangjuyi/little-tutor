@@ -68,6 +68,7 @@ class SessionState(TypedDict):
     assistance_level: Optional[str]
     hint_count: int
     scaffold_level: int
+    skip: bool
     result: Optional[QuestionResult]
     round_results: List[QuestionResult]
     session_proposals: List[dict]

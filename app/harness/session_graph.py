@@ -45,7 +45,7 @@ from app.domain.adaptation import (
     order_questions_for_target,
     select_next_target,
 )
-from app.domain.answer_template import first_wrong_blank, judge_blanks
+from app.domain.answer_template import breakpoint_label, judge_blanks
 from app.domain.grading import (
     pick_difficulty,
 )
@@ -313,17 +313,45 @@ class GradeState(TypedDict):
     assistance_level: Optional[str]
     hint_count: int
     scaffold_level: int
+    skip: bool
     result: Optional[dict]
 
 
 def _grade_compute_node(state: GradeState) -> dict:
-    result = grade_question(
-        state["current_question"], state["student_steps"], get_llm("grade")
-    )
+    if state.get("skip"):
+        question = state["current_question"]
+        result = {
+            "question_id": question["id"],
+            "is_correct": False,
+            "final_answer_correct": False,
+            "process_correct": False,
+            "error": {
+                "error_type": "未归因",
+                "error_kp_id": question["kp_id"],
+                "confidence": 0.0,
+                "evidence": "学生选择跳过本题，未形成作答证据",
+                "evidence_source": "program",
+                "ai_certain": False,
+                "teacher_reviewed": False,
+                "steps_analyzed": 0,
+                "insufficient_evidence": True,
+                "program_breakpoint": "学生选择跳过本题",
+            },
+            "steps": [],
+        }
+    else:
+        result = grade_question(
+            state["current_question"], state["student_steps"], get_llm("grade")
+        )
+    final_answer_correct = bool(result["is_correct"])
+    result["final_answer_correct"] = final_answer_correct
+    result["process_correct"] = True
     result["difficulty"] = state["current_question"].get("difficulty")
     result["attempt_no"] = int(state.get("attempt_no") or 1)
     result["assistance_level"] = (
-        state.get("assistance_level") or "independent"
+        "skipped"
+        if state.get("skip")
+        else state.get("assistance_level") or "independent"
     )
     result["hint_count"] = int(state.get("hint_count") or 0)
     result["scaffold_level"] = int(state.get("scaffold_level") or 0)
@@ -331,11 +359,21 @@ def _grade_compute_node(state: GradeState) -> dict:
     if template:
         blank_results = judge_blanks(template, state["student_steps"])
         result["blank_results"] = blank_results
-        breakpoint = first_wrong_blank(blank_results)
+        breakpoint = breakpoint_label(blank_results)
+        result["process_correct"] = breakpoint is None
         if breakpoint:
+            result["is_correct"] = False
             result["error"]["program_breakpoint"] = (
-                f"程序定位断点：{breakpoint['blank_id']}（{breakpoint['basis']}）"
+                f"程序定位断点：{breakpoint}"
             )
+            if result["error"]["error_type"] == "无错":
+                result["error"].update({
+                    "error_type": "未归因",
+                    "confidence": 0.0,
+                    "evidence": "最终答案正确，但中间步骤存在错误，待老师确认",
+                    "evidence_source": "program",
+                    "insufficient_evidence": False,
+                })
     return {"result": result}
 
 
@@ -389,6 +427,7 @@ def collect_round_node(state: SessionState) -> dict:
         "adaptive_target": next_target,
         "hint_level": 0,
         "scaffold_level": 0,
+        "skip": False,
         "phase": "answer",
     }
 

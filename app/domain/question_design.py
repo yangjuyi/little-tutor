@@ -128,7 +128,10 @@ def _direct(slot: int, difficulty: DifficultyLevel) -> dict:
     else:
         structure_tag, design_id = "", "direct"
     params = _params_from_roots(a, r1, r2, structure_tag, design_id)
-    stem = f"解方程 {_format_equation(a, params['b'], params['c'])}，求 x 的全部值。"
+    stem = (
+        f"解方程 {_format_equation(a, params['b'], params['c'])}，"
+        "请用配方法求 x 的全部值。"
+    )
     return {
         "stem": stem,
         "params": params,
@@ -222,7 +225,7 @@ def _multi_step(slot: int) -> dict:
     return {
         "stem": (
             f"解方程 {_format_equation(a, params['b'], params['c'])}。"
-            "先观察系数并化简，再求 x 的全部值。"
+            "先观察系数并化简，再用配方法求 x 的全部值。"
         ),
         "params": params,
         "analysis": _factor_analysis(a, r1, r2),
@@ -243,10 +246,13 @@ def _fallback(difficulty: DifficultyLevel, slot: int) -> dict:
     if difficulty == "hard":
         stem = (
             f"解方程 {_format_equation(a, b, c)}。"
-            "先观察系数并化简，再求 x 的全部值。"
+            "先观察系数并化简，再用配方法求 x 的全部值。"
         )
     else:
-        stem = f"解方程 {_format_equation(a, b, c)}，求 x 的全部值。"
+        stem = (
+            f"解方程 {_format_equation(a, b, c)}，"
+            "请用配方法求 x 的全部值。"
+        )
     return {
         "stem": stem,
         "params": params,

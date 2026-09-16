@@ -6,6 +6,7 @@
 """
 
 import json
+import logging
 from pathlib import Path
 
 from app.adapters.persistence import KnowledgePoint, Question, SessionLocal, init_db
@@ -20,6 +21,28 @@ DEFAULT_KP_META = {
     "chapter": "一元二次方程",
     "concept": "通过配方将方程化为 (x+m)²=n 的形式求解",
 }
+logger = logging.getLogger(__name__)
+
+
+def _infer_design_id(seed: dict) -> str:
+    """为人工整理题补齐题型标记；无法判断时按直接求解题处理。"""
+    params = seed.setdefault("params", {})
+    if params.get("design_id"):
+        return str(params["design_id"])
+    stem = str(seed.get("stem") or "")
+    structure_tag = str(seed.get("structure_tag") or "")
+    if "根与系数" in stem:
+        design_id = "root_relation"
+    elif "长方形" in stem or "菜地" in stem:
+        design_id = "rectangle"
+    elif "连续偶数" in stem:
+        design_id = "consecutive_even"
+    elif structure_tag == "多步化简" or "先观察系数" in stem:
+        design_id = "multi_step"
+    else:
+        design_id = "direct"
+    params["design_id"] = design_id
+    return design_id
 
 
 def load_seed_questions(
@@ -48,6 +71,8 @@ def load_seed_questions(
             s.flush()
         existing = {stem for (stem,) in s.query(Question.stem).all()}
         for seed in payload["questions"]:
+            if curated:
+                _infer_design_id(seed)
             a, b, c = (seed["params"][k] for k in ("a", "b", "c"))
             difficulty = seed["difficulty"]
             error = validate_difficulty_params(
@@ -84,5 +109,14 @@ def load_private_questions() -> int:
     added = 0
     if PRIVATE_DIR.exists():
         for path in sorted(PRIVATE_DIR.glob("*.json")):
-            added += load_seed_questions(path=path, source="private", curated=True)
+            try:
+                added += load_seed_questions(
+                    path=path, source="private", curated=True
+                )
+            except Exception as exc:
+                logger.warning(
+                    "private question file skipped: %s (%s)",
+                    path.name,
+                    exc.__class__.__name__,
+                )
     return added

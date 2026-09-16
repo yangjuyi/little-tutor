@@ -12,7 +12,7 @@ from langgraph.graph import StateGraph, START, END
 
 from app.adapters.checkpoint import default_checkpointer
 from app.adapters.llm import generate_question, get_llm, grade_question
-from app.domain.answer_template import build_template, first_wrong_blank, judge_blanks
+from app.domain.answer_template import breakpoint_label, build_template, judge_blanks
 from app.harness.profile_graph import profile_update_node
 from app.harness.state import TutorState
 
@@ -46,11 +46,25 @@ def grade_node(state: TutorState) -> dict:
     if template:
         blank_results = judge_blanks(template, state["student_steps"])
         result["blank_results"] = blank_results
-        breakpoint = first_wrong_blank(blank_results)
+        result["final_answer_correct"] = bool(result["is_correct"])
+        breakpoint = breakpoint_label(blank_results)
+        result["process_correct"] = breakpoint is None
         if breakpoint:
+            result["is_correct"] = False
             result["error"]["program_breakpoint"] = (
-                f"程序定位断点：{breakpoint['blank_id']}（{breakpoint['basis']}）"
+                f"程序定位断点：{breakpoint}"
             )
+            if result["error"]["error_type"] == "无错":
+                result["error"].update({
+                    "error_type": "未归因",
+                    "confidence": 0.0,
+                    "evidence": "最终答案正确，但中间步骤存在错误，待老师确认",
+                    "evidence_source": "program",
+                    "insufficient_evidence": False,
+                })
+    else:
+        result["final_answer_correct"] = bool(result["is_correct"])
+        result["process_correct"] = True
     return {"result": result, "phase": "profile"}
 
 

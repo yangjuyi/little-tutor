@@ -144,7 +144,7 @@ class Mastery(Base):
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), index=True)
     kp_id: Mapped[int] = mapped_column(ForeignKey("knowledge_points.id"), index=True)
     level: Mapped[str] = mapped_column(String(20), default=MasteryLevel.WEAK.value)
-    confidence: Mapped[float] = mapped_column(default=0.0)              # 0~1 置信度（V1 占位，P2 接入 §16.5 计算规则）
+    confidence: Mapped[float] = mapped_column(default=0.0)              # 0~1 置信度（由会话证据规则计算）
     confirmed_wrong_count: Mapped[int] = mapped_column(default=0)       # 累计被老师确认的答错次数（reject 的建议不计）
     last_status: Mapped[str | None] = mapped_column(Text, nullable=True)  # 最近一次批改归因备注（V1 复用作画像 evidence 来源）
     updated_at: Mapped[datetime] = mapped_column(
@@ -363,4 +363,4 @@ if __name__ == "__main__":
         pass
 
     init_db()
-    print("✅ 数据库已初始化：", (BASE_DIR / "tutor.db"))
+    print("✅ 数据库已初始化：", DATABASE_PATH)
