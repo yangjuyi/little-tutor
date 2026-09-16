@@ -13,7 +13,20 @@
 .\.venv\Scripts\python.exe -m unittest discover -s tests -q
 ```
 
-当前基线：`180` 项通过。
+当前基线：`209` 项通过。
+
+真实浏览器 UI 验收：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\run_browser_acceptance.ps1
+```
+
+该脚本会验证非法题量、H1 非法改题、老师定稿、学生连续跳过、学生/老师等待页、
+老师 reject 落库和手机首页布局。它需要先启动隔离验证服务。
+
+Android 真机说明：当前 Vivo 浏览器不向 UI Automator 暴露网页 DOM，按坐标驱动的
+ADB 全流程脚本未通过稳定性验收，已不纳入自动化通过标准。真机手机流程继续人工
+执行，直到改用可由 Playwright/CDP 控制的浏览器。
 
 真实 LLM 端到端使用临时数据库和临时 checkpoint，退出后自动清理：
 
@@ -26,6 +39,8 @@
 
 `wrong` 模式会让首题最终答案错误，用于验证程序判分、错误证据落库、
 AI 归因或程序兜底，以及 H3 在错误作答下的 accept/reject 分流。
+错误记录必须存在且 `error_type` 非空；具体错因分类不作为稳定验收断言，
+只记录当次运行样本，避免把 LLM 的一次分类结果写成固定契约。
 
 LLM 网络不可用时，冒烟允许走“程序判分 + 归因不可用”兜底，但必须满足：
 
@@ -137,7 +152,7 @@ Get-FileHash .\checkpoints.db
 
 - 连续点击三次“需要提示”；
 - 确认提示不泄露最终答案；
-- 至少请求一次“还是不会，给我分步帮助”，确认分步帮助只给当前步骤方法，
+- 至少请求两次提示，再请求一次“还是不会，升级为分步帮助”，确认分步帮助只给当前步骤方法，
   不显示最终答案；
 - 提交后确认 `scaffold_level > 0`、`assistance_level=scaffolded`、
   `evidence_weight=0.25`；

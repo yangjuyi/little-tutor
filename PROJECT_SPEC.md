@@ -427,7 +427,9 @@
 
 - **账号与业务分离（2026-08-31）**：`user` 只存登录（username/password_hash/role），学生/老师业务数据各自放业务表，用 `user_id`/`student_id` 关联。`role` 做权限隔离（学生/老师页面访问控制）。V1 老师即 `user(role=teacher)`，业务数据走 `teacher_decision`。**user 表只存账号层（一用户一行几字节），存储压力可忽略**，大头是 answer_record/mastery。
 - **session_counter**：`session_id` 序数靠它原子自增，`date`+`seq` 唯一约束，防同一天并发开两组撞号（见 §16.4）。
-- **V1 起步 6 张够跑通闭环**；表跟着业务流走，后续缺哪张再补（迭代设计，不一次定死）。
+- **V1 初始设计 6 张够跑通闭环**；实际演进到 V2 已是 8 张，新增
+  `practice_sessions` 和 `profiles`，分别承载会话生命周期和学生画像。
+  表继续跟着业务流走，但真实数据开始保留后，schema 变化应走版本化迁移。
 - **吸收率 / 行为信号**（策略层+心理层）：V1 先塞进 `answer_record` 汇总字段，V2 需要单独表再加。
 
 ### 10.3 题库（文件存储，不是表）
