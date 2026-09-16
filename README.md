@@ -11,7 +11,7 @@
 > 产品参考见 [PRODUCT_RESEARCH.md](PRODUCT_RESEARCH.md)，
 > 版本变更见 [CHANGELOG.md](CHANGELOG.md)
 
-## 当前状态：v0.2.0 baseline（V2 验收通过，待提交）
+## 当前状态：v0.2.0 baseline（V2 验收通过；真实题评测加固）
 
 LangGraph 核心闭环已端到端跑通：
 
