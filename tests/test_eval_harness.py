@@ -5,6 +5,7 @@ from __future__ import annotations
 import unittest
 
 from evals.harness import build_cases, program_only_grader, run_cases, summarize
+from tests.private_fixtures import HAS_PRIVATE_DRILLS
 
 
 class TestEvalHarness(unittest.TestCase):
@@ -16,6 +17,7 @@ class TestEvalHarness(unittest.TestCase):
             {"with_process", "final_only", "missing_root", "wrong_root", "no_steps"},
         )
 
+    @unittest.skipUnless(HAS_PRIVATE_DRILLS, "private drill bank unavailable")
     def test_private_cases_are_optional_and_separated(self):
         cases = build_cases(source="private", limit_questions=2)
         self.assertEqual(len(cases), 10)

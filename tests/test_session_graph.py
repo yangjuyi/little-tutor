@@ -29,6 +29,7 @@ from app.harness.session_graph import (
     build_session_graph,
     parse_intent_bias,
 )
+from tests.private_fixtures import HAS_GROWTH_MAIN_CHAIN
 
 
 SEEDS = [
@@ -1162,6 +1163,7 @@ class TestSessionGraph(unittest.TestCase):
                 True,
             )
 
+    @unittest.skipUnless(HAS_GROWTH_MAIN_CHAIN, "private growth-rate bank unavailable")
     def test_structured_growth_questions_run_through_h1_and_grading(self):
         with self.session() as s:
             kp = db.KnowledgePoint(

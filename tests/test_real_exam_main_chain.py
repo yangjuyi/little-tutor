@@ -37,6 +37,7 @@ from app.domain.question_materialization import materialize_question
 from app.domain.assessment.elements import judge_block
 from app.application.student_practice import _build_student_steps
 from app.harness.hints import build_hint, build_scaffold
+from tests.private_fixtures import HAS_MULTIPART_SPECS
 
 
 HAS_PRIVATE_BANK = DEFAULT_BANK.exists() and DEFAULT_GROWTH_SPECS.exists()
@@ -256,6 +257,7 @@ class TestRealExamMainChain(unittest.TestCase):
         self.assertEqual(steps[-1]["result"], "1000(1+x)^2=1440")
         self.assertTrue(check_structured_exam_answer(record, steps[-1]["result"]))
 
+    @unittest.skipUnless(HAS_MULTIPART_SPECS, "private multipart specs unavailable")
     def test_multipart_growth_application_runs_through_subquestions(self):
         item = load_multipart_specs()[0]
         params = {

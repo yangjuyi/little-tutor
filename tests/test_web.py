@@ -24,6 +24,7 @@ import app.harness.session_graph as sg
 from app.adapters.real_exam_bank import load_growth_main_chain_questions
 from app.web.view_models import build_done_context
 from app.domain.answer_template import build_template
+from tests.private_fixtures import HAS_GROWTH_MULTIPLE_CHOICE
 from tests.test_session_graph import SEEDS, conflicting_stem, seed_stem
 
 
@@ -441,6 +442,10 @@ class TestWebFlow(unittest.TestCase):
         answer = self.client.get("/answer/0")
         self.assertIn('name="viewport"', answer.text)
 
+    @unittest.skipUnless(
+        HAS_GROWTH_MULTIPLE_CHOICE,
+        "private growth-rate multiple-choice bank unavailable",
+    )
     def test_growth_practice_renders_real_exam_choice_form(self):
         with self.session() as s:
             kp = db.KnowledgePoint(

@@ -13,7 +13,9 @@
 .\.venv\Scripts\python.exe -m unittest discover -s tests -q
 ```
 
-当前基线：`260` 项通过。
+当前基线：`308` 项通过；测试会自动注入占位 API Key，不需要本地 `.env`。
+依赖忽略目录 `data/private_questions/` 的 4 个测试在缺少私有题料时会显式
+`skip`，不会以凭证或缺失数据错误失败。
 
 真实浏览器 UI 验收：
 
