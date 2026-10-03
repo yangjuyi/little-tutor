@@ -69,6 +69,25 @@ web -> application -> domain
 6. 旧根目录实现模块已删除，当前只保留 `cli.py` 和 `runtime.py`。
 7. 组卷与候选物化已拆入 `harness/question_assembly.py`。
 8. 会话写并发由数据库租约控制，不再依赖单进程内存锁。
+9. 结构化真实题通过 `domain/exam` 题型契约接入判分、组卷和 H1；当前增长率
+   / 降价率完成 15 道主链路验收，普通配方法仍走原模板填空路径。
+10. 新增 `domain/assessment` 题型 handler 注册表；核心物化、模板、判分和 LLM
+    适配通过注册表分派，增长率成为第一个独立 handler，不再由核心层判断
+    `question_type` 细节。
+11. 新增通用作答元素注册：`choice`、`numeric/expression`、`symbolic/equation`
+    由独立元素判定器负责；模板逐空判定通过元素注册表统一执行。
+12. Subquestion 结果已可聚合、持久化和逐子问题老师确认；2024 西藏和 2025
+    岳麓模拟两道真实 `(1)(2)` 题目已接入数据、模板和 UI，下一步扩更多家族。
+13. `domain/exam/main_chain.py` 已从“增长题专用”收口为通用结构化题型入口：
+    判别式选择、方程重构、参数根、整体代换和符号根均能完成物化与程序判分。
+14. 最终答案判分按带标签根做严格集合比较，能够拒绝多写错误根，同时保留
+    题干过程数字不参与最终根判断。
+15. 私有试卷采集器增加单实例文件锁和进程唯一临时清单，避免两个采集进程
+    覆盖同一 manifest；PID 文件由采集器自身维护。
+16. 新增双会话自适应验收：第一次会话的老师确认结果会改变数据库画像，第二次
+    会话读取新画像后，预审题池的难度配比和目标难度确实发生变化。
+17. 注册判别式选择题 handler，成为第二个真实题型家族；真实题验收同时验证
+    handler 物化与判分路径，不再只验证底层 solver。
 
 ## 过程诊断契约（2026-09-14 定）
 
@@ -96,7 +115,7 @@ TransitionCheck
   confidence
   insufficient_evidence
 
-Submission
+ProcessSubmission
   mode              # final_answer_only / step_by_step
   steps
   final_answer
@@ -115,7 +134,7 @@ Submission
 
 | 当前文件/职责 | 当前问题 | 目标职责 | 迁移方式 |
 |---|---|---|---|
-| `domain/models.py::StudentStep` | 只有 `basis/result` | 保留旧契约并新增 `StudentStepV2`、`TransitionCheck`、`Submission` | 先并存，不破坏旧调用 |
+| `domain/models.py::StudentStep` | 只有 `basis/result` | 保留旧契约并新增 `StudentStepV2`、`TransitionCheck`、`ProcessSubmission` | 先并存，不破坏旧调用 |
 | `domain/answer_template.py` | 同时生成模板和执行判定 | 降级为 legacy 输入适配器 | 新过程诊断稳定后再迁入 legacy |
 | `application/student_practice.py::_build_student_steps` | 表单空位直接拼学生步骤 | 输入适配器 + 应用服务 | 拆成 `final_answer_only` 和 `step_by_step` 两条组装路径 |
 | `harness/session_graph.py::_grade_compute_node` | 只调用 `judge_blanks` | 调用过程诊断并合并最终判定 | 先旁路接入，旧路径保留为回退 |
@@ -173,12 +192,166 @@ app/domain/plugins/
 
 插件只扩展领域能力，不重写 Harness 和业务闭环。
 
+## 综合题扩展机制（2026-09-17 定）
+
+“题型家族”和“拓展机制”必须分开：
+
+- **题型家族**是业务内容，例如增长率、利润、二次函数、电路、化学方程式；
+- **拓展机制**是平台接口，例如 QuestionHandler、Subquestion、
+  ResponseElement、Evaluation、老师逐子问题确认；
+- 作答形式（选择、填空、方程、多步步骤）属于通用机制，不属于某个题型家族。
+
+新增题型家族时只允许新增：
+
+```text
+domain/assessment/handlers/<family>.py
+spec / schema / solver / validator / tests
+真实题数据与评测用例
+```
+
+不得在核心层新增：
+
+```text
+if question_type == "..."
+```
+
+只有两个以上题型会共同使用的能力，才允许提升为通用机制，并必须补全量回归。
+
+当前分层：
+
+```text
+QuestionHandler
+  supports()
+  materialize()
+  supports_template()
+  build_template()
+  check_answer()
+  question_roots()
+
+ResponseElement
+  choice
+  numeric / expression
+  symbolic / equation
+```
+
+当前已落地的综合题契约：
+
+```text
+SubquestionSpec
+Submission
+EvaluationPart
+Evaluation
+```
+
+新的多步解答题先拆成子问题：
+
+```text
+第(1)问：列方程或求数值
+第(2)问：继续计算
+第(3)问：说明理由或筛选有效解
+```
+
+程序只判可计算节点；rubric 和开放理由交给 AI 提取证据、老师终审。最终结论
+继续遵守三层分离：程序初评事实、AI 归因证据、老师确认后的有效结论。
+
+批改链路的实现边界同样遵守这一原则：
+
+```text
+validate_input
+→ compute_program_grade
+→ attribute_error / attribution_fallback
+→ merge_grade_result
+→ record_fact
+```
+
+`compute_program_grade` 不调用 LLM，负责最终答案、过程断点和逐空事实；
+`attribute_error` 只输出建议性错因字段，不拥有 `is_correct`。归因模型异常时，
+`attribution_fallback` 将结果降级为 `evidence_source=program`，程序事实仍可
+继续落库并进入老师确认。
+
+## 真实题语料审计与架构改动（2026-09-17）
+
+对第一试卷网已下载的初中数学语料完成一次全量粗切审计：
+
+```text
+已下载题录       1027
+去重候选题块     1988
+首批候选队列     280
+```
+
+审计产物在本地忽略目录：
+
+```text
+outputs/private_sources/shijuan1/corpus_audit.json
+outputs/private_sources/shijuan1/corpus_audit.md
+outputs/private_sources/shijuan1/intake_shortlist.json
+```
+
+候选只代表文本和关键词层面可抽，不代表答案正确或已经支持。录入顺序固定为：
+
+```text
+candidate -> curated -> structured -> solver_verified
+-> answer_verified -> process_supported -> accepted
+```
+
+### 首批录入范围
+
+| 题型家族 | 审计候选 | 首批录入建议 | 架构动作 |
+|---|---:|---:|---|
+| 增长率 / 下降率 | 52 | 再录 15 道，现有 15 道保留 | 扩展现有 handler 的周期、方向和反求类型 |
+| 利润 / 销售 | 184 | 录 30 道 | 新增独立 handler、solver 和子问题 schema |
+| 判别式 / 参数范围 | 224 | 录 30 道 | 新增符号约束和参数范围判定 |
+| 根与系数 | 105 | 录 15-30 道 | 复用符号等价，新增根关系 solver |
+| 整体代换 | 67 | 录 15 道 | 复用符号等价，新增目标表达式求值 |
+| 面积 / 几何建模 | 1312 | 只留 20 道文本型探针 | 不进入首批 handler，先验证几何参数契约 |
+| 动点 / 动态几何 | 121 | 只留 10-20 道探针 | 后置到图形模型和视觉输入阶段 |
+
+物化、高中和其余四科当前各只有少量下载，不进入本轮录入。它们只能作为
+将来 `SubjectPlugin` 的边界探针，不能据此声称学科支持。
+
+### 语料触发的契约改动
+
+1. `QuestionHandler` 继续保持领域插件边界，但需增加题型元数据，而不是在核心层
+   新增 `question_type` 分支：
+
+```text
+handler.kind
+handler.capabilities
+handler.response_schema
+handler.requires_media
+handler.source_policy
+```
+
+2. `Subquestion` / `Submission` / `Evaluation` 保持通用。首批候选中多步题占比
+   较高，不能为利润或增长率各写一套子问题机制。
+
+3. 新增题库 intake 契约，生产数据与派生结论继续解绑：
+
+```text
+source_article_id
+source_url
+year / region / exam_type
+dedupe_hash
+parse_status
+media_requirements
+review_status
+structured_questions
+```
+
+4. 几何题只先增加“媒体依赖”标记和探针题，不提前把图形结构、OCR 或视觉模型
+   塞进核心判分链。只有文本几何契约稳定后，才允许提升为几何领域模型。
+
+5. 学科插件边界暂时不变。现有语料不足以证明物理、化学需要哪类共享契约；
+   在没有各科真实题和独立验收前，不新增“综合大插件”。
+
+本轮架构修改只影响领域契约、handler 元数据和题库 intake；Harness、应用层、
+Web 和数据库结构暂不因这批语料提前重构。
+
 ## 后续工作
 
-1. 落过程诊断契约和一元二次方程转换校验器。
-2. 接入首次作答、提示次数和受助程度。
-3. 让老师审核支持修正等级、错因和测试标记。
-4. 将会话状态、证据等级和掌握度置信度继续规则化。
-5. 评估旧串图 `harness/legacy_graph.py` 是否退役。
+1. 将已实现的过程诊断接入主链路，旧 `judge_blanks` 保留兼容回退。
+2. 继续规则化会话状态、证据等级和掌握度置信度。
+3. 扩展真实多步题型、部分分策略和更多题型 handler。
+4. 评估旧串图 `harness/legacy_graph.py` 是否退役。
 
 未决设计问题记录在 `ARCHITECTURE_QUESTIONS.md`。
