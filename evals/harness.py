@@ -78,6 +78,7 @@ def _build_variants(question: dict, prefix: str) -> list[dict]:
     correct = _answer_text(roots)
     wrong = _answer_text([root + 1 for root in roots])
     partial = _answer_text(roots[:1]) if len(roots) > 1 else ""
+    repeated_root = len(roots) > 1 and len(set(roots)) == 1
     common_tags = [
         f"difficulty:{question.get('difficulty', 'unknown')}",
         f"design:{question['params'].get('design_id', 'unknown')}",
@@ -105,11 +106,15 @@ def _build_variants(question: dict, prefix: str) -> list[dict]:
         },
         {
             "case_id": f"{prefix}-partial-answer",
-            "tags": common_tags + ["wrong", "missing_root"],
+            "tags": common_tags + (
+                ["correct", "repeated_root"]
+                if repeated_root
+                else ["wrong", "missing_root"]
+            ),
             "student_steps": [
                 {"basis": "只完成部分求解", "result": partial},
             ],
-            "expected_program_correct": False,
+            "expected_program_correct": repeated_root,
             "expected_insufficient_evidence": None,
         },
         {
@@ -257,8 +262,12 @@ def summarize(results: list[dict]) -> dict:
         and result["actual"]["error_type"] not in (None, "", "无错")
         for result in wrong_cases
     )
-    fallback_count = sum(
+    program_evidence_count = sum(
         result["actual"]["evidence_source"] == "program"
+        for result in results
+    )
+    llm_evidence_count = sum(
+        result["actual"]["evidence_source"] == "llm"
         for result in results
     )
     attributed_count = sum(
@@ -296,7 +305,8 @@ def summarize(results: list[dict]) -> dict:
         "total_cases": total,
         "program_accuracy": _rate(program_matches, total),
         "attribution_nonempty_rate": _rate(attributed_count, total),
-        "fallback_rate": _rate(fallback_count, total),
+        "program_evidence_rate": _rate(program_evidence_count, total),
+        "llm_evidence_rate": _rate(llm_evidence_count, total),
         "correct_guard_pass_rate": _rate(
             correct_guard_passes, len(correct_cases)
         ),

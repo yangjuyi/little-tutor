@@ -7,10 +7,12 @@ import tempfile
 import typing
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app.adapters.llm import (
     _load_prompt,
     _render_prompt,
+    _usage_summary,
     get_llm,
 )
 from app.application.student_practice import _parse_count
@@ -34,7 +36,11 @@ class TestPromptWiring(unittest.TestCase):
         prompt = _load_prompt("grader_v1.md")
         self.assertIn("{stem}", prompt)
         self.assertIn("{answer}", prompt)
-        self.assertIn("{steps}", prompt)
+        self.assertIn("{program_facts_json}", prompt)
+        self.assertIn("{steps_json}", prompt)
+        self.assertIn("DATA", prompt)
+        self.assertIn("INSTRUCTION", prompt)
+        self.assertNotIn('"is_correct"', prompt)
 
     def test_render_prompt_preserves_json_braces(self):
         rendered = _render_prompt(
@@ -75,6 +81,27 @@ class TestLlmTaskSelection(unittest.TestCase):
     def test_unknown_task_is_rejected(self):
         with self.assertRaises(ValueError):
             get_llm("unknown")
+
+    def test_usage_summary_tracks_tokens_and_optional_cost(self):
+        usage = {
+            "model-a": {
+                "input_tokens": 1000,
+                "output_tokens": 500,
+            }
+        }
+        with patch.dict(
+            os.environ,
+            {
+                "TUTOR_LLM_INPUT_COST_PER_1M": "2",
+                "TUTOR_LLM_OUTPUT_COST_PER_1M": "8",
+            },
+            clear=False,
+        ):
+            summary = _usage_summary(usage)
+        self.assertEqual(summary["input_tokens"], 1000)
+        self.assertEqual(summary["output_tokens"], 500)
+        self.assertEqual(summary["total_tokens"], 1500)
+        self.assertEqual(summary["estimated_cost"], 0.006)
 
 
 class TestRuntimeIsolation(unittest.TestCase):

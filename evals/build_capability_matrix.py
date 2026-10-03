@@ -15,6 +15,9 @@ DEFAULT_JSON = ROOT / "outputs" / "evals" / "middle_exam_capability_matrix.json"
 DEFAULT_ACCEPTANCE = (
     ROOT / "outputs" / "evals" / "middle_exam_solver_acceptance.json"
 )
+DEFAULT_MAIN_CHAIN = (
+    ROOT / "outputs" / "evals" / "middle_exam_main_chain_acceptance.json"
+)
 MIN_SAMPLE_PER_TYPE = 15
 
 CAPABILITIES = {
@@ -99,9 +102,11 @@ def main() -> None:
     parser.add_argument("--markdown", type=Path, default=DEFAULT_MARKDOWN)
     parser.add_argument("--json", type=Path, default=DEFAULT_JSON)
     parser.add_argument("--acceptance", type=Path, default=DEFAULT_ACCEPTANCE)
+    parser.add_argument("--main-chain", type=Path, default=DEFAULT_MAIN_CHAIN)
     args = parser.parse_args()
 
     acceptance: dict[str, str] = {}
+    main_chain: dict[str, str] = {}
     accepted_by_type: dict[str, dict] = {}
     if args.acceptance.exists():
         acceptance_payload = json.loads(
@@ -115,6 +120,14 @@ def main() -> None:
             item["spec_type"]: item
             for item in acceptance_payload.get("type_summaries") or []
         }
+    if args.main_chain.exists():
+        main_chain_payload = json.loads(
+            args.main_chain.read_text(encoding="utf-8")
+        )
+        main_chain = {
+            item["question_id"]: item["status"]
+            for item in main_chain_payload.get("results") or []
+        }
     payload = json.loads(args.source.read_text(encoding="utf-8"))
     counts = Counter()
     matrix = []
@@ -127,8 +140,15 @@ def main() -> None:
             "province": question.get("province"),
             "source_type": question.get("source_type"),
             "capabilities": capabilities,
-            "current_support": bool(question.get("current_support")),
+            "current_support": (
+                main_chain.get(question.get("id"))
+                == "main_chain_verified"
+            ),
             "solver_status": acceptance.get(
+                question.get("id"),
+                "unsupported",
+            ),
+            "main_chain_status": main_chain.get(
                 question.get("id"),
                 "unsupported",
             ),
@@ -174,6 +194,7 @@ def main() -> None:
         f"- 题目总数：{result['total_questions']}",
         f"- 当前可运行：{result['supported_questions']}",
         f"- 离线求解已验证：{result['solver_verified_questions']}",
+        f"- 主链路已验证：{result['supported_questions']}",
         f"- 单题型最低样本：{result['min_sample_per_type']}",
         "",
         "## 能力优先级",
@@ -191,8 +212,8 @@ def main() -> None:
         "",
         "## 逐题能力",
         "",
-        "| 题号 | 年份/地区 | 能力 | 求解状态 |",
-        "|---|---|---|---|",
+        "| 题号 | 年份/地区 | 能力 | 求解状态 | 主链路状态 |",
+        "|---|---|---|---|---|",
     ])
     for item in matrix:
         labels = [
@@ -202,7 +223,7 @@ def main() -> None:
         lines.append(
             f"| {item['id']} | {item['year']} {item['province']} | "
             + "、".join(labels)
-            + f" | {item['solver_status']} |"
+            + f" | {item['solver_status']} | {item['main_chain_status']} |"
         )
     args.markdown.write_text("\n".join(lines), encoding="utf-8")
     print(f"questions={len(matrix)} capabilities={len(capabilities)}")

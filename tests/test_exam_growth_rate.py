@@ -65,6 +65,14 @@ class TestGrowthRateSolver(unittest.TestCase):
             )
         )
 
+    def test_equation_equivalence_accepts_full_width_parentheses(self):
+        self.assertTrue(
+            equation_equivalent(
+                "1000（1+x）^2=1440",
+                "1000(1+x)^2=1440",
+            )
+        )
+
     def test_invalid_direction_is_rejected(self):
         with self.assertRaises(ValueError):
             GrowthRateSpec(initial=48, final=27, periods=2, mode="growth")

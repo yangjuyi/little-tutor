@@ -2,6 +2,7 @@
 
 运行: .venv/Scripts/python -X utf8 scripts/e2e_smoke.py
       [题量, 默认 2] [accept|reject, 默认 accept] [correct|wrong, 默认 correct]
+      [知识点, 默认 配方法解一元二次方程]
 链路: 开会话 → 组卷预审定稿 → 逐题作答（correct 全对；wrong 首题错、其余对）
 → 会话汇总 → H3 批量确认 → 落库断言。
 """
@@ -14,8 +15,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-def _correct_answers(params: dict) -> dict:
-    from app.domain.answer_template import build_template
+def _correct_answers(question: dict) -> dict:
+    from app.domain.answer_template import (
+        build_template,
+        supports_question_template,
+    )
+
+    params = question.get("params") or {}
+    if not supports_question_template(params):
+        return {"final_answer": question["answer"]}
 
     template = build_template(params)
     return {
@@ -28,12 +36,25 @@ def _correct_answers(params: dict) -> dict:
     }
 
 
-def _wrong_answers(params: dict) -> dict:
+def _wrong_answers(question: dict) -> dict:
     """把首题的首个最终答案空位改错，保证程序判分命中错误分支。"""
-    from app.domain.answer_template import build_template
+    from app.domain.answer_template import (
+        build_template,
+        supports_question_template,
+    )
+
+    params = question.get("params") or {}
+    if not supports_question_template(params):
+        return {
+            "final_answer": (
+                "x=1"
+                if params.get("target") == "equation"
+                else "999%"
+            )
+        }
 
     template = build_template(params)
-    answers = _correct_answers(params)
+    answers = _correct_answers(question)
     answer_ids = template.get("answer_blank_ids") or [template["blanks"][-1]["id"]]
     target = next(
         blank for blank in template["blanks"] if blank["id"] == answer_ids[0]
@@ -60,6 +81,11 @@ def main() -> None:
     answer_mode = sys.argv[3].strip().lower() if len(sys.argv) > 3 else "correct"
     if answer_mode not in ("correct", "wrong"):
         raise SystemExit("answer_mode 必须是 correct 或 wrong")
+    kp_name = (
+        sys.argv[4].strip()
+        if len(sys.argv) > 4
+        else "配方法解一元二次方程"
+    )
     with tempfile.TemporaryDirectory(prefix="little-tutor-smoke-") as temp_dir:
         os.environ["TUTOR_DB_PATH"] = str(Path(temp_dir) / "tutor.db")
         os.environ["TUTOR_CHECKPOINT_PATH"] = str(Path(temp_dir) / "checkpoints.db")
@@ -85,7 +111,9 @@ def main() -> None:
                 record_type=AnswerRecord, mastery_type=Mastery,
                 decision_type=TeacherDecision,
                 session_type=PracticeSessionRecord,
-                decision=decision, answer_mode=answer_mode,
+                decision=decision,
+                answer_mode=answer_mode,
+                kp_name=kp_name,
             )
         finally:
             close_default_checkpointer()
@@ -96,12 +124,17 @@ def _run_smoke(
     client_factory, app, graph_factory, count: int, session_factory,
     record_type, mastery_type, decision_type, session_type, decision,
     answer_mode: str = "correct",
+    kp_name: str = "配方法解一元二次方程",
 ) -> None:
 
     client = client_factory(app)
     t0 = time.time()
 
-    r = client.post("/start", data={"count": str(count)}, follow_redirects=False)
+    r = client.post(
+        "/start",
+        data={"count": str(count), "kp_name": kp_name},
+        follow_redirects=False,
+    )
     assert r.status_code == 303, f"/start 失败: {r.status_code}"
     print(f"[1/6] 开会话 OK（{time.time() - t0:.1f}s）")
 
@@ -129,9 +162,9 @@ def _run_smoke(
         page = client.get(f"/answer/{idx}")
         assert page.status_code == 200, f"/answer/{idx} 异常: {page.status_code}"
         answers = (
-            _wrong_answers(question["params"])
+            _wrong_answers(question)
             if answer_mode == "wrong" and idx == 0
-            else _correct_answers(question["params"])
+            else _correct_answers(question)
         )
         r = client.post(f"/answer/{idx}", data=answers, follow_redirects=False)
         assert r.status_code == 303, f"作答提交失败: {r.status_code}"

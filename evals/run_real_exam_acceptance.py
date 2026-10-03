@@ -27,6 +27,7 @@ from app.domain.exam.answer_equiv import (
 )
 from app.domain.exam.registry import solve_exam_spec
 from app.domain.exam.solvers import verify_growth_rate_result
+from app.domain.assessment import get_question_handler
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -97,6 +98,22 @@ def main() -> None:
                 or expression_equivalent(answer, item["expected"])
                 for answer in answers
             )
+        handler_params = {
+            "question_type": spec_type,
+            "exam_spec": item["spec"],
+        }
+        handler = get_question_handler(handler_params)
+        handler_passed = None
+        if handler is not None:
+            materialized = handler.materialize({
+                "stem": question.get("stem", ""),
+                "params": handler_params,
+            })
+            handler_passed = handler.check_answer(
+                materialized,
+                str(item["expected"]),
+            )
+            passed = passed and handler_passed
         results.append({
             "question_id": item["question_id"],
             "year": question.get("year"),
@@ -109,6 +126,8 @@ def main() -> None:
             "equation": solution.get("equation"),
             "all_solutions": solution.get("all_solutions", []),
             "valid_solutions": solution.get("valid_solutions", []),
+            "handler": handler.kind if handler is not None else None,
+            "handler_verified": handler_passed,
             "status": "solver_verified" if passed else "failed",
             "passed": passed,
         })

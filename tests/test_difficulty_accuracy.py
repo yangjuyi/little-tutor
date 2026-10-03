@@ -59,12 +59,23 @@ class TestAccuracyByDifficulty(unittest.TestCase):
 
     def _record(self, student_id, difficulty, is_correct, session_id="sess-1"):
         with self.session() as s:
+            attempt_no = (
+                s.query(db.AnswerRecord)
+                .filter_by(
+                    student_id=student_id,
+                    question_id=self.questions[difficulty],
+                    session_id=session_id,
+                )
+                .count()
+                + 1
+            )
             s.add(db.AnswerRecord(
                 student_id=student_id,
                 question_id=self.questions[difficulty],
                 answer="x1=3",
                 is_correct=is_correct,
                 session_id=session_id,
+                attempt_no=attempt_no,
             ))
             s.commit()
 

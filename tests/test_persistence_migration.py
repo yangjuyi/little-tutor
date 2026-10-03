@@ -69,6 +69,34 @@ class TestAnswerEvidenceMigration(unittest.TestCase):
             engine.dispose()
             os.unlink(tmp.name)
 
+    def test_schema_migrations_are_recorded_and_idempotent(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        engine = create_engine(f"sqlite:///{tmp.name}")
+        try:
+            with patch.object(persistence, "engine", engine):
+                persistence.init_db()
+                persistence.init_db()
+            with engine.connect() as conn:
+                versions = {
+                    row[0]
+                    for row in conn.exec_driver_sql(
+                        "SELECT version FROM schema_migrations"
+                    ).fetchall()
+                }
+            self.assertEqual(
+                versions,
+                {
+                    "20261003_answer_evidence",
+                    "20261003_practice_lease",
+                    "20261003_teacher_decision_dedupe",
+                    "20261003_answer_attempt_unique",
+                },
+            )
+        finally:
+            engine.dispose()
+            os.unlink(tmp.name)
+
 
 if __name__ == "__main__":
     unittest.main()

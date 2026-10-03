@@ -35,6 +35,8 @@ class TestEvalHarness(unittest.TestCase):
         self.assertEqual(summary["wrong_guard_pass_rate"], 1.0)
         self.assertEqual(summary["insufficient_evidence_rate"], 1.0)
         self.assertEqual(summary["no_evidence_over_attribution_rate"], 0.0)
+        self.assertEqual(summary["program_evidence_rate"], 1.0)
+        self.assertEqual(summary["llm_evidence_rate"], 0.0)
 
 
 if __name__ == "__main__":

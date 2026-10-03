@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -12,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 import app.adapters.session_store as session_store
 import app.adapters.persistence as db
+import app.application.student_practice as student_practice
 
 
 class TestSessionStore(unittest.TestCase):
@@ -193,6 +195,60 @@ class TestSessionStore(unittest.TestCase):
         with ThreadPoolExecutor(max_workers=2) as executor:
             results = list(executor.map(acquire, ("worker-a", "worker-b")))
         self.assertEqual(sorted(results), [False, True])
+
+    def test_renew_practice_lease_extends_expiry_only_for_owner(self):
+        session_store.start_practice_session(
+            "S20260912-005", self.student_id, self.kp_id
+        )
+        self.assertTrue(
+            session_store.acquire_practice_lease(
+                "S20260912-005",
+                owner="worker-a",
+                ttl_seconds=30,
+            )
+        )
+        with self.session() as s:
+            before = s.get(
+                db.PracticeSessionRecord, "S20260912-005"
+            ).lease_expires_at
+
+        self.assertFalse(
+            session_store.renew_practice_lease(
+                "S20260912-005",
+                owner="worker-b",
+                ttl_seconds=120,
+            )
+        )
+        self.assertTrue(
+            session_store.renew_practice_lease(
+                "S20260912-005",
+                owner="worker-a",
+                ttl_seconds=120,
+            )
+        )
+        with self.session() as s:
+            after = s.get(
+                db.PracticeSessionRecord, "S20260912-005"
+            ).lease_expires_at
+        self.assertGreater(after, before)
+
+    def test_session_guard_renews_lease_during_long_operation(self):
+        session_store.start_practice_session(
+            "S20260912-006", self.student_id, self.kp_id
+        )
+        with patch.dict(
+            os.environ,
+            {"TUTOR_LEASE_TTL_SECONDS": "1"},
+            clear=False,
+        ):
+            with student_practice._session_guard("S20260912-006"):
+                time.sleep(1.3)
+                with self.session() as s:
+                    row = s.get(
+                        db.PracticeSessionRecord,
+                        "S20260912-006",
+                    )
+                    self.assertGreater(row.lease_expires_at, datetime.now())
 
     def test_backfill_legacy_session_uses_recorded_decision(self):
         with self.session() as s:

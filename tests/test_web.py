@@ -18,8 +18,10 @@ import app.web as web
 import app.web.auth as web_auth
 import app.application.profile_evidence as profile_evidence
 import app.application.student_practice as student_practice
+import app.harness.grade_pipeline as grade_pipeline
 import app.harness.question_assembly as question_assembly
 import app.harness.session_graph as sg
+from app.adapters.real_exam_bank import load_growth_main_chain_questions
 from app.web.view_models import build_done_context
 from app.domain.answer_template import build_template
 from tests.test_session_graph import SEEDS, conflicting_stem, seed_stem
@@ -97,17 +99,16 @@ class TestWebFlow(unittest.TestCase):
         os.unlink(self.db_path)
         os.unlink(self.ckpt_path)
 
-    def _fake_grade(self):
+    def _fake_attribution(self, error_type="计算"):
         return {
-            "question_id": "q",
-            "is_correct": True,
-            "error": {
-                "error_type": "无错", "error_kp_id": str(self.kp_id),
-                "confidence": 1.0, "evidence": "test", "evidence_source": "llm",
-                "ai_certain": True, "teacher_reviewed": False,
-                "steps_analyzed": 1, "insufficient_evidence": False,
-            },
-            "steps": [],
+            "error_type": error_type,
+            "confidence": 0.5,
+            "evidence": "test attribution",
+            "evidence_source": "llm",
+            "ai_certain": False,
+            "teacher_reviewed": False,
+            "steps_analyzed": 1,
+            "insufficient_evidence": False,
         }
 
     def _correct_answer_data(self, idx):
@@ -124,7 +125,14 @@ class TestWebFlow(unittest.TestCase):
                 data[blank["id"]] = f"{blank['expected']:g}"
         return data
 
-    def _full_flow(self, decision="accept", level=None, extra=None):
+    def _full_flow(
+        self,
+        decision="accept",
+        level=None,
+        extra=None,
+        grade_correct=True,
+        expect_summary_error=False,
+    ):
         resp = self.client.post("/start", data={"count": "2"}, follow_redirects=False)
         self.assertEqual(resp.status_code, 303)
         resp = self.client.get("/teacher/review")
@@ -138,10 +146,19 @@ class TestWebFlow(unittest.TestCase):
         for idx in range(2):
             page = self.client.get(f"/answer/{idx}")
             self.assertIn('name="b1"', page.text)
+            self.assertIn("正在跳过", page.text)
             if idx == 1:
                 self.assertNotIn("程序初评", page.text)
                 self.assertIn("第 2 / 2 题", page.text)
             data = self._correct_answer_data(idx)
+            if not grade_correct:
+                for key in reversed(list(data)):
+                    value = data[key]
+                    if value.lstrip("-").isdigit():
+                        data[key] = str(int(value) + 1)
+                        break
+                else:
+                    data[next(iter(data))] = "999"
             resp = self.client.post(f"/answer/{idx}", data=data, follow_redirects=False)
             next_url = (
                 f"/answer/{idx + 1}"
@@ -150,11 +167,18 @@ class TestWebFlow(unittest.TestCase):
             )
             self.assertEqual(resp.headers["location"], next_url)
             feedback = self.client.get(f"/feedback/{idx}")
-            self.assertIn("程序判分：正确", feedback.text)
+            self.assertIn(
+                "程序判分：正确" if grade_correct else "程序判分：错误",
+                feedback.text,
+            )
             self.assertNotIn("AI 归因", feedback.text)
         completed = self.client.get("/answer/2")
         self.assertIn("本次作答汇总", completed.text)
-        self.assertEqual(completed.text.count("程序初评正确"), 2)
+        self.assertIn("提交给老师确认中", completed.text)
+        if grade_correct:
+            self.assertEqual(completed.text.count("程序初评正确"), 2)
+        else:
+            self.assertEqual(completed.text.count("程序初评错误"), 2)
         result = self.client.get("/result/1")
         self.assertIn("程序初评", result.text)
         resp = self.client.post("/summarize", follow_redirects=False)
@@ -173,8 +197,10 @@ class TestWebFlow(unittest.TestCase):
         self.assertIn("本次练习结果确认", summary.text)
         self.assertIn("确认并更新学生画像", summary.text)
         self.assertIn("题级归因证据", summary.text)
-        self.assertIn("AI 归因", summary.text)
+        if not grade_correct:
+            self.assertIn("AI 归因", summary.text)
         self.assertIn('name="error_0"', summary.text)
+        self.assertIn('name="result_0"', summary.text)
         self.assertIn('name="test_session"', summary.text)
         summary_data = {"decision": decision}
         if level:
@@ -186,11 +212,14 @@ class TestWebFlow(unittest.TestCase):
             data=summary_data,
             follow_redirects=False,
         )
+        if expect_summary_error:
+            self.assertEqual(resp.headers["location"], "/teacher/summary")
+            return self.client.get("/teacher/summary")
         self.assertEqual(resp.headers["location"], "/teacher/completed")
         return self.client.get("/done")
 
     def test_full_flow_accept_writes_mastery(self):
-        with patch.object(sg, "grade_question", return_value=self._fake_grade()):
+        with patch.object(grade_pipeline, "attribute_error", return_value=self._fake_attribution()):
             done = self._full_flow("accept")
         self.assertIn("学生画像已更新", done.text)
         self.assertIn("学生画像", done.text)
@@ -211,6 +240,158 @@ class TestWebFlow(unittest.TestCase):
             self.assertEqual(answer.attempt_no, 1)
             self.assertTrue(answer.first_attempt_correct)
             self.assertEqual(answer.assistance_level, "independent")
+
+    def test_summarize_before_h1_redirects_without_server_error(self):
+        resp = self.client.post(
+            "/start",
+            data={"count": "2"},
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 303)
+
+        resp = self.client.post("/summarize", follow_redirects=False)
+        self.assertEqual(resp.status_code, 303)
+        self.assertEqual(resp.headers["location"], "/waiting")
+
+        resp = self.client.get(
+            "/waiting-confirmation",
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 303)
+        self.assertEqual(resp.headers["location"], "/waiting")
+
+    def test_resume_session_restores_student_answer_page(self):
+        resp = self.client.post(
+            "/start",
+            data={"count": "2"},
+            follow_redirects=False,
+        )
+        session_id = resp.cookies["thread_id"]
+        self.client.post(
+            "/teacher/review",
+            data={"decision": "approve"},
+            follow_redirects=False,
+        )
+        self.client.cookies.clear()
+
+        resp = self.client.get(
+            f"/resume?session_id={session_id}",
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 303)
+        self.assertEqual(resp.headers["location"], "/answer/0")
+        self.assertEqual(resp.cookies["thread_id"], session_id)
+        self.assertIn("Max-Age=2592000", resp.headers["set-cookie"])
+
+    def test_resuming_aborted_session_reactivates_it(self):
+        resp = self.client.post(
+            "/start",
+            data={"count": "2"},
+            follow_redirects=False,
+        )
+        session_id = resp.cookies["thread_id"]
+        with self.session() as s:
+            session = s.get(db.PracticeSessionRecord, session_id)
+            session.status = "aborted"
+            session.review_status = "pending"
+            s.commit()
+
+        resp = self.client.get(
+            f"/resume?session_id={session_id}",
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 303)
+        with self.session() as s:
+            session = s.get(db.PracticeSessionRecord, session_id)
+            self.assertEqual(session.status, "started")
+            self.assertEqual(session.review_status, "pending")
+
+    def test_resume_requires_owner_cookie_or_signed_token(self):
+        with patch.dict(
+            os.environ,
+            {"TUTOR_TEACHER_TOKEN": "resume-secret"},
+            clear=False,
+        ):
+            resp = self.client.post(
+                "/start",
+                data={"count": "2"},
+                follow_redirects=False,
+            )
+            session_id = resp.cookies["thread_id"]
+            token = web_auth.resume_token(session_id)
+
+            stranger = TestClient(web.app)
+            denied = stranger.get(
+                f"/resume?session_id={session_id}",
+                follow_redirects=False,
+            )
+            self.assertEqual(
+                denied.headers["location"],
+                "/?error=resume_denied",
+            )
+
+            allowed = stranger.get(
+                f"/resume?session_id={session_id}&token={token}",
+                follow_redirects=False,
+            )
+            self.assertEqual(allowed.status_code, 303)
+            self.assertTrue(
+                allowed.headers["location"].startswith("/")
+            )
+
+    def test_home_links_to_history_without_visible_session_id(self):
+        resp = self.client.post(
+            "/start",
+            data={"count": "2"},
+            follow_redirects=False,
+        )
+        session_id = resp.cookies["thread_id"]
+        self.client.post(
+            "/teacher/review",
+            data={"decision": "approve"},
+            follow_redirects=False,
+        )
+        del self.client.cookies["thread_id"]
+
+        home = self.client.get("/")
+        self.assertIn("我的练习记录", home.text)
+        self.assertNotIn("继续上次未完成练习", home.text)
+        self.assertNotIn("例如 web-", home.text)
+
+        resp = self.client.get("/resume", follow_redirects=False)
+        self.assertEqual(resp.status_code, 303)
+        self.assertEqual(resp.headers["location"], "/my-sessions")
+
+        history = self.client.get("/my-sessions")
+        self.assertIn(f"session_id={session_id}", history.text)
+
+    def test_student_session_history_can_select_any_session(self):
+        started = []
+        for _ in range(2):
+            resp = self.client.post(
+                "/start",
+                data={"count": "1"},
+                follow_redirects=False,
+            )
+            started.append(resp.cookies["thread_id"])
+
+        page = self.client.get("/my-sessions")
+        self.assertIn("我的练习记录", page.text)
+        self.assertIn(f"session_id={started[0]}", page.text)
+        self.assertIn(f"session_id={started[1]}", page.text)
+        self.assertNotIn("session_id</", page.text)
+
+    def test_invalid_summary_decision_stays_on_summary(self):
+        with patch.object(grade_pipeline, "attribute_error", return_value=self._fake_attribution()):
+            page = self._full_flow(
+                "maybe",
+                expect_summary_error=True,
+            )
+        self.assertIn("审批未生效", page.text)
+        self.assertIn("H3 决策必须是 accept / reject", page.text)
+        with self.session() as s:
+            self.assertEqual(s.query(db.TeacherDecision).count(), 0)
+            self.assertEqual(s.query(db.Mastery).count(), 0)
 
     def test_start_rejects_invalid_question_count(self):
         for raw in ("-1", "0", "abc", "31"):
@@ -248,8 +429,68 @@ class TestWebFlow(unittest.TestCase):
                 ).values
                 self.assertEqual(values["question_count"], 10)
 
+    def test_core_pages_declare_mobile_viewport(self):
+        index = self.client.get("/")
+        self.assertIn('name="viewport"', index.text)
+
+        self.client.post(
+            "/start",
+            data={"count": "2"},
+            follow_redirects=False,
+        )
+        answer = self.client.get("/answer/0")
+        self.assertIn('name="viewport"', answer.text)
+
+    def test_growth_practice_renders_real_exam_choice_form(self):
+        with self.session() as s:
+            kp = db.KnowledgePoint(
+                subject="数学",
+                chapter="一元二次方程",
+                kp_name="一元二次方程增长率",
+                concept="a(1+x)^n=b",
+            )
+            s.add(kp)
+            s.flush()
+            records = [
+                record
+                for record in load_growth_main_chain_questions(kp.id)
+                if record["params"].get("response_type") == "multiple_choice"
+            ]
+            for record in records:
+                s.add(db.Question(
+                    kp_id=kp.id,
+                    stem=record["stem"],
+                    answer=record["answer"],
+                    analysis=record["analysis"],
+                    difficulty=record["difficulty"],
+                    source=record["source"],
+                    params=record["params"],
+                ))
+            s.commit()
+
+        resp = self.client.post(
+            "/start",
+            data={
+                "count": "1",
+                "kp_name": "一元二次方程增长率",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 303)
+        review = self.client.get("/teacher/review")
+        self.assertIn("真实中考结构化题", review.text)
+        resp = self.client.post(
+            "/teacher/review",
+            data={"decision": "approve"},
+            follow_redirects=False,
+        )
+        self.assertEqual(resp.status_code, 303)
+        answer = self.client.get("/answer/0")
+        self.assertIn('name="b1"', answer.text)
+        self.assertNotIn('name="final_answer"', answer.text)
+
     def test_full_flow_reject_keeps_mastery_clean(self):
-        with patch.object(sg, "grade_question", return_value=self._fake_grade()):
+        with patch.object(grade_pipeline, "attribute_error", return_value=self._fake_attribution()):
             done = self._full_flow("reject")
         self.assertIn("本次未更新学生画像", done.text)
         with self.session() as s:
@@ -264,7 +505,7 @@ class TestWebFlow(unittest.TestCase):
             self.assertEqual(answer.scaffold_level, 0)
 
     def test_teacher_can_correct_mastery_before_accept(self):
-        with patch.object(sg, "grade_question", return_value=self._fake_grade()):
+        with patch.object(grade_pipeline, "attribute_error", return_value=self._fake_attribution()):
             done = self._full_flow("accept", level="strong")
         self.assertIn("学生画像已更新", done.text)
         with self.session() as s:
@@ -275,8 +516,16 @@ class TestWebFlow(unittest.TestCase):
             self.assertTrue(decision.proposal["teacher_corrected"])
 
     def test_teacher_can_correct_error_type_from_summary(self):
-        with patch.object(sg, "grade_question", return_value=self._fake_grade()):
-            self._full_flow("accept", extra={"error_0": "漏根"})
+        with patch.object(
+            grade_pipeline,
+            "attribute_error",
+            return_value=self._fake_attribution(),
+        ):
+            self._full_flow(
+                "accept",
+                extra={"error_0": "漏根"},
+                grade_correct=False,
+            )
         with self.session() as s:
             answer = (
                 s.query(db.AnswerRecord)
@@ -294,7 +543,7 @@ class TestWebFlow(unittest.TestCase):
             )
 
     def test_full_flow_can_mark_test_session(self):
-        with patch.object(sg, "grade_question", return_value=self._fake_grade()):
+        with patch.object(grade_pipeline, "attribute_error", return_value=self._fake_attribution()):
             done = self._full_flow(
                 "accept", extra={"test_session": "1"}
             )
@@ -306,7 +555,7 @@ class TestWebFlow(unittest.TestCase):
             self.assertEqual(session.review_status, "accepted")
 
     def test_hint_is_recorded_and_resets_for_next_question(self):
-        with patch.object(sg, "grade_question", return_value=self._fake_grade()):
+        with patch.object(grade_pipeline, "attribute_error", return_value=self._fake_attribution()):
             self.client.post("/start", data={"count": "2"})
             self.client.post(
                 "/teacher/review", data={"decision": "approve"}
@@ -325,7 +574,7 @@ class TestWebFlow(unittest.TestCase):
             self.assertEqual(answer.assistance_level, "hinted")
 
     def test_scaffold_is_recorded_and_enters_evidence_chain(self):
-        with patch.object(sg, "grade_question", return_value=self._fake_grade()):
+        with patch.object(grade_pipeline, "attribute_error", return_value=self._fake_attribution()):
             self.client.post("/start", data={"count": "2"})
             self.client.post(
                 "/teacher/review", data={"decision": "approve"}
@@ -349,7 +598,7 @@ class TestWebFlow(unittest.TestCase):
             self.assertEqual(answer.evidence_weight, 0.25)
 
     def test_wrong_process_with_correct_final_answer_is_not_marked_correct(self):
-        with patch.object(sg, "grade_question", return_value=self._fake_grade()):
+        with patch.object(grade_pipeline, "attribute_error", return_value=self._fake_attribution()):
             self.client.post("/start", data={"count": "2"})
             self.client.post(
                 "/teacher/review", data={"decision": "approve"}
@@ -478,7 +727,7 @@ class TestWebFlow(unittest.TestCase):
 
     def test_back_navigation_cannot_duplicate_answers(self):
         """浏览器后退到已答题：只能看结果，重答被拦截，不产生重复数据"""
-        with patch.object(sg, "grade_question", return_value=self._fake_grade()):
+        with patch.object(grade_pipeline, "attribute_error", return_value=self._fake_attribution()):
             self.client.post("/start", data={"count": "2"})
             self.client.post(
                 "/teacher/review", data={"decision": "approve"}
@@ -535,6 +784,16 @@ class TestWebFlow(unittest.TestCase):
 
     def test_ratio_sliders_keep_submitted_values_after_regroup(self):
         self.client.post("/start", data={"count": "4"})
+        initial = self.client.get("/teacher/review")
+        self.assertIn(
+            'name="simple_r" min="0" max="100" step="5" value="60"',
+            initial.text,
+        )
+        self.assertIn(
+            'name="mid_r" min="0" max="100" step="5" value="40"',
+            initial.text,
+        )
+        self.assertIn('<output id="v-hard">0</output>', initial.text)
         resp = self.client.post(
             "/teacher/review/regroup-ratios",
             data={"simple_r": "70", "mid_r": "20"},
@@ -655,6 +914,22 @@ class TestWebFlow(unittest.TestCase):
             review = other.get("/teacher/review")
             self.assertIn("组卷预审", review.text)
 
+    def test_teacher_dashboard_marks_aborted_session(self):
+        resp = self.client.post(
+            "/start",
+            data={"count": "2"},
+            follow_redirects=False,
+        )
+        session_id = resp.cookies["thread_id"]
+        with self.session() as s:
+            row = s.get(db.PracticeSessionRecord, session_id)
+            row.status = "aborted"
+            s.commit()
+
+        page = self.client.get("/teacher/sessions")
+        self.assertIn("已中断", page.text)
+        self.assertRegex(page.text, r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
+
     def test_error_page_retries_without_manual_thread_id(self):
         self.client.cookies.set("thread_id", "t-error-page")
         with patch.object(
@@ -667,6 +942,20 @@ class TestWebFlow(unittest.TestCase):
         self.assertIn("组卷失败", page.text)
         self.assertIn('href="/teacher/review"', page.text)
         self.assertNotIn("原会话 ID", page.text)
+
+    def test_unhandled_error_returns_request_id_page(self):
+        client = TestClient(web.app, raise_server_exceptions=False)
+        with patch.object(
+            student_practice,
+            "load_summary",
+            side_effect=RuntimeError("boom"),
+        ):
+            client.cookies.set("thread_id", "t-request-id")
+            page = client.get("/waiting-confirmation")
+        self.assertEqual(page.status_code, 500)
+        self.assertIn("系统内部错误", page.text)
+        self.assertIn("请求编号", page.text)
+        self.assertRegex(page.headers["X-Request-ID"], r"^[0-9a-f]{12}$")
 
 
 if __name__ == "__main__":

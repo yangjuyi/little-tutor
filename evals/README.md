@@ -48,6 +48,25 @@
 
 该命令只统计 `real_exam_acceptance`，不会把生成题结果混入中考能力结论。
 
+老师决定与归因证据汇总（只读）：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 evals\report_teacher_decisions.py
+```
+
+该脚本输出老师决定计数、错因修正次数、结果推翻次数和“作答到决定延迟”。
+当前 schema 没有逐题审核分母，因此不计算虚假的采纳率或修正率；延迟也不
+等于人工审核耗时。badcase 记录模板见 `evals/BADCASE_RECORDING.md`。
+
+增长率真实题主链路验收：
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 evals\run_real_exam_main_chain_acceptance.py
+```
+
+该命令使用隔离临时库，验证 15 道增长题的正确答案接受、错误答案拒绝，
+并额外跑 H1 预审 + 正确作答 / 错误作答图流程。
+
 ## 离线运行
 
 ```powershell
@@ -70,11 +89,32 @@
 .\.venv\Scripts\python.exe -X utf8 evals\run_eval.py --mode real --tag no_steps
 ```
 
+## 当前基线
+
+- 全量自动化测试：`308` 项。
+- 最近完整真实 LLM Eval：公开 `45` 条 + 本地私有 `180` 条；程序判分和
+  归因非空率均为 `100%`，对应当前 Prompt 指纹 `a7650164fb16`。
+- 正确题和无步骤题会按设计跳过 LLM，直接使用程序证据；这类正常路径计入
+  `program_evidence_rate`，不再沿用旧指标名 `fallback_rate`。
+- 私有中考题：`49` 道；离线结构化求解 `20` 道。
+- 增长率 / 降价率：`15/15` 完成主链路验收。
+- 双会话自适应：画像升级与降级会改变下一轮难度配比，端到端测试通过。
+- 判别式第二 handler：已注册，当前 1 道真实题通过 handler 路径。
+- 真实多问解答题：2 道 `(1)(2)` 题目已接入主链路子问题机制。
+- 程序初评与老师终审分层：`is_correct` 保留程序事实，
+  `teacher_is_correct` 保存老师确认结论。
+- 通用 response element：`choice`、`numeric/expression`、
+  `symbolic/equation`。
+- 过程诊断：离线切片已实现，尚未接入主练习链路。
+- RAG、OCR、多 Agent、物理和化学：尚未实现。
+
 ## 指标
 
 - `program_accuracy`：程序判分是否符合用例预期
 - `attribution_nonempty_rate`：错误或正确状态是否都有非空归因
-- `fallback_rate`：LLM 不可用或结构失败后走程序兜底的比例
+- `program_evidence_rate`：最终归因证据来自程序路径的比例，包含正常跳过和
+  确定性归一化，不等同于 LLM 故障兜底
+- `llm_evidence_rate`：最终归因证据来自 LLM 的比例
 - `correct_guard_pass_rate`：正确作答是否被守住为 `无错`
 - `wrong_guard_pass_rate`：错误作答是否被守住为非空错因
 - `insufficient_evidence_rate`：无步骤用例是否正确标记证据不足

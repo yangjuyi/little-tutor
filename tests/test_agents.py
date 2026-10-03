@@ -3,11 +3,17 @@
 Run with: .venv/Scripts/python -m unittest tests.test_agents -v
 """
 
+import os
 import unittest
 from unittest import mock
 from collections import Counter
 
-from app.adapters.llm import generate_question, grade_question
+from app.adapters.llm import (
+    AttributionOutput,
+    generate_question,
+    get_llm,
+    grade_question,
+)
 from app.domain.grading import (
     check_is_correct,
     compute_answer,
@@ -156,8 +162,18 @@ class TestCheckIsCorrect(unittest.TestCase):
     def test_extra_process_numbers_ok(self):
         self.assertTrue(check_is_correct("x²-5x+6=0，所以 x=2 或 x=3", [3.0, 2.0]))
 
+    def test_extra_root_is_rejected(self):
+        self.assertFalse(
+            check_is_correct("x1=1, x2=2, x3=3", [1.0, 2.0])
+        )
+        self.assertFalse(
+            check_is_correct("x=1, 2, 99/2", [1.0, 2.0])
+        )
+
     def test_repeated_root(self):
         self.assertTrue(check_is_correct("x = 2", [2.0, 2.0]))
+        self.assertTrue(check_is_correct("x1=1.5, x2=1.5", [1.5, 1.5]))
+        self.assertTrue(check_is_correct("x1=1.5", [1.5, 1.5]))
 
     def test_empty_answer(self):
         self.assertFalse(check_is_correct("", [3.0, 2.0]))
@@ -169,6 +185,7 @@ class _FakeStructuredLLM:
 
     def __init__(self, payload):
         self._payload = payload
+        self.prompts = []
 
     def with_structured_output(self, model, method=None):
         outer = self
@@ -176,6 +193,7 @@ class _FakeStructuredLLM:
         class _Stub:
             @staticmethod
             def invoke(prompt):
+                outer.prompts.append(prompt)
                 return model(**outer._payload)
 
         return _Stub()
@@ -193,7 +211,6 @@ class TestGradeQuestionIntegration(unittest.TestCase):
     }
 
     AI_PAYLOAD = {
-        "is_correct": True,
         "error_type": "无错",
         "confidence": 1.0,
         "evidence": "ok",
@@ -201,17 +218,20 @@ class TestGradeQuestionIntegration(unittest.TestCase):
         "insufficient_evidence": False,
     }
 
-    def _grade(self, student_result):
+    def _grade(self, student_result, payload=None):
         return grade_question(
             dict(self.QUESTION),
             [{"basis": "求解", "result": student_result}],
-            _FakeStructuredLLM(self.AI_PAYLOAD),
+            _FakeStructuredLLM(payload or self.AI_PAYLOAD),
         )
 
     def test_partial_answer_rejected_even_if_ai_says_correct(self):
         # 子串时代这里会假阳性：AI 说对，程序必须推翻
-        result = self._grade("3")
+        result = self._grade("3", {**self.AI_PAYLOAD, "is_correct": True})
         self.assertFalse(result["is_correct"])
+
+    def test_attribution_schema_has_no_verdict_field(self):
+        self.assertNotIn("is_correct", AttributionOutput.model_fields)
 
     def test_full_answer_accepted_normal_format(self):
         result = self._grade("x1=3, x2=2")
@@ -219,7 +239,6 @@ class TestGradeQuestionIntegration(unittest.TestCase):
 
     def test_no_steps_cannot_force_specific_error_type(self):
         payload = {
-            "is_correct": False,
             "error_type": "计算",
             "confidence": 0.5,
             "evidence": "推测计算错误",
@@ -236,6 +255,39 @@ class TestGradeQuestionIntegration(unittest.TestCase):
         self.assertEqual(result["error"]["confidence"], 0.0)
         self.assertTrue(result["error"]["insufficient_evidence"])
 
+    def test_steps_are_json_bounded_and_length_limited(self):
+        llm = _FakeStructuredLLM(self.AI_PAYLOAD)
+        long_basis = "x" * 240
+        result = grade_question(
+            dict(self.QUESTION),
+            [{"basis": long_basis, "result": "x=999"}],
+            llm,
+        )
+        self.assertFalse(result["is_correct"])
+        self.assertEqual(len(llm.prompts), 1)
+        prompt = llm.prompts[0]
+        self.assertIn('"step_no": 1', prompt)
+        self.assertIn("程序判分事实", prompt)
+        self.assertIn("x" * 200, prompt)
+        self.assertNotIn("x" * 201, prompt)
+
+    def test_choice_steps_include_option_context_for_llm(self):
+        llm = _FakeStructuredLLM(self.AI_PAYLOAD)
+        result = grade_question(
+            dict(self.QUESTION),
+            [{
+                "basis": "选择正确的式子",
+                "result": "2",
+                "options": ["x + 2", "x + 3", "2x"],
+                "selected_option_text": "x + 3",
+            }],
+            llm,
+        )
+        self.assertFalse(result["is_correct"])
+        prompt = llm.prompts[0]
+        self.assertIn('"selected_option_text": "x + 3"', prompt)
+        self.assertIn('"options": [', prompt)
+
 
 class _ExplodingStructuredLLM:
     """LLM 挂掉的离线替身：结构化输出调用必炸（测全局异常兜底）"""
@@ -247,6 +299,79 @@ class _ExplodingStructuredLLM:
                 raise RuntimeError("api down")
 
         return _Stub()
+
+
+class _TimeoutStructuredLLM:
+    """LLM 超时替身：验证超时按归因失败降级，不影响程序判分事实。"""
+
+    def with_structured_output(self, model, method=None):
+        class _Stub:
+            @staticmethod
+            def invoke(prompt):
+                raise TimeoutError("llm request timed out")
+
+        return _Stub()
+
+
+class TestLlmRuntimeConfig(unittest.TestCase):
+    def tearDown(self):
+        get_llm.cache_clear()
+
+    def test_default_timeout_and_retries(self):
+        get_llm.cache_clear()
+        with mock.patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "test-key",
+                "OPENAI_TIMEOUT_SECONDS": "",
+                "OPENAI_MAX_RETRIES": "",
+            },
+            clear=False,
+        ):
+            llm = get_llm("grade")
+        self.assertEqual(llm.request_timeout, 30.0)
+        self.assertEqual(llm.max_retries, 2)
+
+    def test_timeout_and_retries_can_be_overridden(self):
+        get_llm.cache_clear()
+        with mock.patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "test-key",
+                "OPENAI_TIMEOUT_SECONDS": "12.5",
+                "OPENAI_MAX_RETRIES": "1",
+            },
+            clear=False,
+        ):
+            llm = get_llm("grade")
+        self.assertEqual(llm.request_timeout, 12.5)
+        self.assertEqual(llm.max_retries, 1)
+
+    def test_invalid_timeout_is_rejected(self):
+        get_llm.cache_clear()
+        with mock.patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "test-key",
+                "OPENAI_TIMEOUT_SECONDS": "0",
+            },
+            clear=False,
+        ):
+            with self.assertRaisesRegex(ValueError, "OPENAI_TIMEOUT_SECONDS"):
+                get_llm("grade")
+
+    def test_invalid_retry_count_is_rejected(self):
+        get_llm.cache_clear()
+        with mock.patch.dict(
+            os.environ,
+            {
+                "OPENAI_API_KEY": "test-key",
+                "OPENAI_MAX_RETRIES": "-1",
+            },
+            clear=False,
+        ):
+            with self.assertRaisesRegex(ValueError, "OPENAI_MAX_RETRIES"):
+                get_llm("grade")
 
 
 class TestGradeFallback(unittest.TestCase):
@@ -279,6 +404,17 @@ class TestGradeFallback(unittest.TestCase):
         self.assertTrue(result["is_correct"])
         self.assertEqual(result["error"]["error_type"], "无错")
         self.assertEqual(result["error"]["evidence_source"], "program")
+
+    def test_timeout_falls_back_without_losing_program_facts(self):
+        result = grade_question(
+            dict(self.QUESTION),
+            [{"basis": "求解", "result": "3"}],
+            _TimeoutStructuredLLM(),
+        )
+        self.assertFalse(result["is_correct"])
+        self.assertEqual(result["error"]["error_type"], "未归因")
+        self.assertEqual(result["error"]["evidence_source"], "program")
+        self.assertTrue(result["error"]["insufficient_evidence"])
 
 
 class TestValidateDifficultyParams(unittest.TestCase):
