@@ -34,7 +34,12 @@ def evidence_weighted_rate(results: Sequence[dict]) -> float:
         return 0.0
     correct_weight = sum(
         evidence_weight_for(
-            bool(result.get("is_correct")),
+            bool(
+                result.get(
+                    "effective_is_correct",
+                    result.get("is_correct"),
+                )
+            ),
             result.get("assistance_level"),
         )
         for result in results

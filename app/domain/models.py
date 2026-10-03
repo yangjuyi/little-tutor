@@ -40,7 +40,9 @@ class StudentStepV2(TypedDict):
 SubmissionMode = Literal["final_answer_only", "step_by_step"]
 
 
-class Submission(TypedDict):
+class ProcessSubmission(TypedDict):
+    """Legacy process submission; distinct from assessment response parts."""
+
     mode: SubmissionMode
     steps: List[StudentStepV2]
     final_answer: str

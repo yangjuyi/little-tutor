@@ -47,11 +47,16 @@ def _format_percent(value: Fraction) -> str:
     return f"{_format_ratio(percent)}%"
 
 
+def _format_number(value: float) -> str:
+    """Keep meaningful decimal precision without trailing .0."""
+    return format(value, ".15g")
+
+
 def _equation_text(spec: GrowthRateSpec) -> str:
     operator = "+" if spec.mode == "growth" else "-"
     return (
-        f"{spec.initial:g}(1{operator}{spec.unknown})"
-        f"^{spec.periods}={spec.final:g}"
+        f"{_format_number(spec.initial)}(1{operator}{spec.unknown})"
+        f"^{spec.periods}={_format_number(spec.final)}"
     )
 
 

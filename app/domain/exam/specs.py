@@ -67,3 +67,50 @@ class ExpressionFromRootSpec:
     equation: str
     root_symbol: str
     target_expression: str
+
+
+def build_exam_spec_from_dict(payload: dict):
+    """Build a typed exam spec from a persisted JSON payload."""
+    spec_type = payload["type"]
+    if spec_type == "growth_rate":
+        return GrowthRateSpec(
+            initial=payload["initial"],
+            final=payload["final"],
+            periods=payload["periods"],
+            mode=payload.get("mode", "growth"),
+            target=payload.get("target", "rate"),
+            unknown=payload.get("unknown", "x"),
+        )
+    if spec_type == "quadratic_roots":
+        return QuadraticRootsSpec(
+            equation=payload["equation"],
+            unknown=payload.get("unknown", "x"),
+            root_filter=payload.get("root_filter", "all"),
+        )
+    if spec_type == "discriminant_choice":
+        return DiscriminantChoiceSpec(
+            choices=payload["choices"],
+            unknown=payload.get("unknown", "x"),
+            select=payload.get("select", "one_distinct"),
+        )
+    if spec_type == "root_reconstruction":
+        return RootReconstructionSpec(
+            root_sum=payload["root_sum"],
+            root_product=payload["root_product"],
+            leading=payload.get("leading", 1),
+            unknown=payload.get("unknown", "x"),
+        )
+    if spec_type == "root_parameter":
+        return RootParameterSpec(
+            equation=payload["equation"],
+            root_assignment=payload["root_assignment"],
+            parameter=payload["parameter"],
+            leading_expression=payload["leading_expression"],
+        )
+    if spec_type == "expression_from_root":
+        return ExpressionFromRootSpec(
+            equation=payload["equation"],
+            root_symbol=payload["root_symbol"],
+            target_expression=payload["target_expression"],
+        )
+    raise ValueError(f"未知真实题 spec 类型：{spec_type}")

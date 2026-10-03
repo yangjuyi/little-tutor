@@ -10,10 +10,9 @@ V2 仅支持一元二次方程（配方法路径）；新题型注册新 builder
 
 import zlib
 
-from app.domain.grading import compute_answer, extract_numbers
-
-BLANK_TOLERANCE = 0.01
-_CHOICE_LETTERS = ("A", "B", "C", "D")
+from app.domain.assessment import get_question_handler
+from app.domain.assessment.elements import judge_block
+from app.domain.grading import compute_answer
 
 
 def _choice(
@@ -29,6 +28,14 @@ def _choice(
         "options": ordered,
         "answer_index": ordered.index(correct_text),
     }
+
+
+def supports_question_template(params: dict | None) -> bool:
+    payload = dict(params or {})
+    if all(key in payload for key in ("a", "b", "c")):
+        return True
+    handler = get_question_handler(payload)
+    return bool(handler and handler.supports_template(payload))
 
 
 def _completion_blanks(
@@ -73,6 +80,9 @@ def _completion_blanks(
 
 def build_template(params: dict) -> dict:
     """按题型结构生成作答模板，并通过 answer_blank_ids 标记最终答案空位。"""
+    handler = get_question_handler(params)
+    if handler is not None:
+        return handler.build_template(params)
     a, b, c = params["a"], params["b"], params["c"]
     x1, x2 = compute_answer(a, b, c)
     design_id = params.get("design_id", "")
@@ -222,29 +232,12 @@ def build_template(params: dict) -> dict:
     return {"blanks": blanks, "answer_blank_ids": answer_blank_ids}
 
 
-def _judge_choice(blank: dict, student_result: str) -> bool:
-    text = student_result.strip().upper()
-    accepted = {str(blank["answer_index"] + 1), _CHOICE_LETTERS[blank["answer_index"]]}
-    return text in accepted
-
-
-def _judge_expression(blank: dict, student_result: str) -> bool:
-    expected = blank["expected"]
-    return any(
-        abs(value - expected) < BLANK_TOLERANCE
-        for value in extract_numbers(student_result)
-    )
-
-
 def judge_blanks(template: dict, student_steps: list) -> list:
     """逐空判定：student_steps 与模板空位按序对应；多出的步骤（最终作答）忽略。"""
     results = []
     for blank, step in zip(template["blanks"], student_steps):
         student_result = (step.get("result") or "").strip()
-        if blank["kind"] == "choice":
-            is_correct = _judge_choice(blank, student_result)
-        else:
-            is_correct = _judge_expression(blank, student_result)
+        is_correct = judge_block(blank, student_result)
         results.append({
             "blank_id": blank["id"],
             "basis": blank["basis"],

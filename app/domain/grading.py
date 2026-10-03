@@ -7,6 +7,8 @@ import random
 import re
 from fractions import Fraction
 
+from app.domain.assessment import get_question_handler
+from app.domain.exam.answer_equiv import extract_labelled_values, values_equivalent
 from app.domain.types import DifficultyLevel, Level
 
 
@@ -46,6 +48,14 @@ def pick_difficulty(mastery_level: Level) -> DifficultyLevel:
     difficulties = [difficulty for difficulty, _ in options]
     weights = [weight for _, weight in options]
     return random.choices(difficulties, weights=weights, k=1)[0]
+
+
+def difficulty_ratios_percent(mastery_level: Level) -> dict[str, int]:
+    """Return the profile-driven matrix in UI/persisted percentage form."""
+    return {
+        difficulty: int(round(weight * 100))
+        for difficulty, weight in DIFFICULTY_RATIOS[mastery_level]
+    }
 
 
 def _is_integer(value: float) -> bool:
@@ -175,14 +185,23 @@ def extract_numbers(text: str) -> set[float]:
 def check_is_correct(student_final: str, roots: list[float]) -> bool:
     if not student_final.strip():
         return False
+    labelled_values = extract_labelled_values(student_final)
+    if labelled_values:
+        actual = list(dict.fromkeys(labelled_values))
+        expected = sorted({round(root, 2) for root in roots})
+        return values_equivalent(
+            actual,
+            [format(root, ".15g") for root in expected],
+        )
     numbers = extract_numbers(student_final)
-    return all(
-        any(abs(number - root) < 0.01 for number in numbers)
-        for root in set(roots)
-    )
+    expected = {round(root, 2) for root in roots}
+    return numbers == expected
 
 
 def question_roots(question: dict) -> list[float]:
+    handler = get_question_handler(question.get("params"))
+    if handler is not None:
+        return handler.question_roots(question)
     params = question.get("params")
     if params:
         if params.get("valid_roots"):

@@ -19,7 +19,7 @@ from sympy.parsing.sympy_parser import (
 )
 from sympy.solvers.solveset import solveset
 
-from app.domain.models import StudentStepV2, Submission, TransitionCheck
+from app.domain.models import ProcessSubmission, StudentStepV2, TransitionCheck
 from app.domain.types import ErrorType
 
 _X = Symbol("x")
@@ -384,7 +384,7 @@ def first_invalid_transition(
     return next((check for check in checks if not check["is_valid"]), None)
 
 
-def diagnose_submission(submission: Submission) -> list[TransitionCheck]:
+def diagnose_submission(submission: ProcessSubmission) -> list[TransitionCheck]:
     if submission["mode"] == "final_answer_only":
         return []
     return diagnose_transitions(submission["steps"])

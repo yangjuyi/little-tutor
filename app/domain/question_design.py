@@ -15,6 +15,7 @@ from functools import lru_cache
 
 from app.domain.grading import compute_answer, validate_difficulty_params
 from app.domain.question_materialization import materialize_question
+from app.domain.teaching_plan import DESIGN_TAGS
 from app.domain.types import DifficultyLevel
 
 
@@ -109,6 +110,7 @@ def _params_from_roots(
         "c": a * r1 * r2,
         "structure_tag": structure_tag,
         "design_id": design_id,
+        "training_tags": list(DESIGN_TAGS.get(design_id, ())),
     }
 
 
@@ -150,6 +152,7 @@ def _consecutive_even(slot: int) -> dict:
         "c": -product,
         "structure_tag": "",
         "design_id": "consecutive_even",
+        "training_tags": list(DESIGN_TAGS["consecutive_even"]),
     }
     return {
         "stem": (
@@ -178,6 +181,7 @@ def _rectangle(slot: int, difficulty: DifficultyLevel) -> dict:
         "structure_tag": "建模" if difficulty == "hard" else "",
         "design_id": "rectangle",
         "valid_roots": [width],
+        "training_tags": list(DESIGN_TAGS["rectangle"]),
     }
     if a == 1:
         relation = f"长比宽多 {offset} 米"
@@ -242,6 +246,7 @@ def _fallback(difficulty: DifficultyLevel, slot: int) -> dict:
     params = {
         "a": a, "b": b, "c": c,
         "structure_tag": structure_tag, "design_id": design_id,
+        "training_tags": list(DESIGN_TAGS.get(design_id, ())),
     }
     if difficulty == "hard":
         stem = (

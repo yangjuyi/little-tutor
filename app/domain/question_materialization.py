@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.domain.assessment import get_question_handler
 from app.domain.grading import compute_answer
 from app.domain.stem_contract import validate_stem_contract
 
@@ -61,6 +62,12 @@ def _build_analysis(
 
 def materialize_question(question: dict, *, regenerate_analysis: bool = False) -> dict:
     """校验语义并重算答案、有效根和参数验证元数据。"""
+    handler = get_question_handler(question.get("params"))
+    if handler is not None:
+        return handler.materialize(
+            question,
+            regenerate_analysis=regenerate_analysis,
+        )
     stem = str(question.get("stem") or "").strip()
     params = dict(question.get("params") or {})
     design_id = str(params.get("design_id") or "")
