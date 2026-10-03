@@ -18,6 +18,7 @@ from app.web.auth import (
     teacher_cookie_value,
     teacher_login_locked,
     teacher_redirect,
+    resume_token,
 )
 from app.web.dependencies import templates
 
@@ -80,17 +81,21 @@ def teacher_sessions_page(request: Request):
     redirect = teacher_redirect(request)
     if redirect:
         return redirect
+    sessions = practice.list_teacher_sessions()
+    for item in sessions:
+        item["resume_token"] = resume_token(item["session_id"])
     return templates.TemplateResponse(
         request,
         "teacher_sessions.html",
         {
-            "sessions": practice.list_teacher_sessions(),
+            "sessions": sessions,
             "state_labels": {
                 "pending_review": "待预审",
                 "in_progress": "答题中",
                 "pending_confirmation": "待画像确认",
                 "done": "已完成",
                 "waiting": "处理中",
+                "aborted": "已中断",
             },
         },
     )
@@ -147,6 +152,7 @@ def review_page(request: Request):
                 "simple_ratio": view["simple_ratio"],
                 "mid_ratio": view["mid_ratio"],
                 "hard_ratio": view["hard_ratio"],
+                "teaching_plan": view.get("teaching_plan"),
                 "busy": request.query_params.get("busy") == "1",
                 "error_message": (
                     view.get("error_message")
@@ -279,6 +285,7 @@ def summary_page(request: Request):
                 "round_results": view["round_results"],
                 "questions": view["questions"],
                 "error_types": ERROR_TYPE_OPTIONS,
+                "error_message": view.get("error_message"),
             },
         )
     if view["kind"] == "done":
@@ -306,19 +313,33 @@ async def summary_post(request: Request):
         for key, value in form.items()
         if key.startswith("error_") and value
     }
+    result_corrections = {
+        key.removeprefix("result_"): str(value)
+        for key, value in form.items()
+        if key.startswith("result_") and value
+    }
+    subquestion_corrections = {
+        key.removeprefix("subresult_"): str(value)
+        for key, value in form.items()
+        if key.startswith("subresult_") and value
+    }
     test_mode = str(form.get("test_session") or "").lower() in (
         "1", "true", "on", "yes",
     )
     try:
-        practice.resolve_summary(
+        result = practice.resolve_summary(
             thread,
             decision,
             corrections,
             error_corrections,
+            result_corrections,
+            subquestion_corrections,
             test_mode,
         )
     except practice.PracticeBusy:
         return RedirectResponse("/teacher/summary?busy=1", status_code=303)
+    if result.get("kind") == "summary":
+        return RedirectResponse("/teacher/summary", status_code=303)
     return RedirectResponse("/teacher/completed", status_code=303)
 
 

@@ -19,15 +19,31 @@ from app.adapters.persistence import (
 
 ReviewDecision = Literal["accepted", "rejected"]
 LEASE_OWNER = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
+DEFAULT_LEASE_TTL_SECONDS = 300
+
+
+def lease_ttl_seconds() -> int:
+    """租约时长；默认覆盖最坏 LLM timeout、重试和退避。"""
+    raw = os.getenv("TUTOR_LEASE_TTL_SECONDS", "").strip()
+    if not raw:
+        return DEFAULT_LEASE_TTL_SECONDS
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("TUTOR_LEASE_TTL_SECONDS 必须是正整数") from exc
+    if value <= 0:
+        raise ValueError("TUTOR_LEASE_TTL_SECONDS 必须大于 0")
+    return value
 
 
 def acquire_practice_lease(
     session_id: str,
     owner: str | None = None,
-    ttl_seconds: int = 120,
+    ttl_seconds: int | None = None,
 ) -> bool:
     """获取会话写租约；有效租约未过期时拒绝其他 worker。"""
     owner = owner or LEASE_OWNER
+    ttl_seconds = ttl_seconds or lease_ttl_seconds()
     now = datetime.now()
     expires_at = now + timedelta(seconds=max(1, ttl_seconds))
     with SessionLocal() as s:
@@ -42,6 +58,29 @@ def acquire_practice_lease(
                 ),
             )
             .values(lease_owner=owner, lease_expires_at=expires_at)
+        )
+        s.commit()
+        return bool(result.rowcount)
+
+
+def renew_practice_lease(
+    session_id: str,
+    owner: str | None = None,
+    ttl_seconds: int | None = None,
+) -> bool:
+    """仅在当前 owner 仍持有租约时延长有效期。"""
+    owner = owner or LEASE_OWNER
+    ttl_seconds = ttl_seconds or lease_ttl_seconds()
+    now = datetime.now()
+    expires_at = now + timedelta(seconds=max(1, ttl_seconds))
+    with SessionLocal() as s:
+        result = s.execute(
+            update(PracticeSessionRecord)
+            .where(
+                PracticeSessionRecord.session_id == session_id,
+                PracticeSessionRecord.lease_owner == owner,
+            )
+            .values(lease_expires_at=expires_at)
         )
         s.commit()
         return bool(result.rowcount)

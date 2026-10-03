@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>开始练习</title>
 <style>body{font-family:sans-serif;max-width:720px;margin:40px auto;padding:0 16px;color:#222}form{margin:16px 0}input,button{font-size:16px;padding:7px 10px}button{cursor:pointer;background:#1a5fb4;color:#fff;border:0;border-radius:5px}.meta{color:#66707a;font-size:14px;margin-top:24px}.error{color:#b3261e;font-weight:bold}</style>
 </head>
@@ -10,9 +11,30 @@
 <p>系统会根据你的作答情况调整后续题目，练习结束后由老师确认学习情况。</p>
 {% if error_message %}<p class="error">{{ error_message }}</p>{% endif %}
 <form method="post" action="/start">
+  <label>练习内容：
+    <select name="kp_name">
+      <option value="配方法解一元二次方程">配方法解一元二次方程</option>
+      <option value="一元二次方程增长率">真实中考增长率与降价率（最多 7 题）</option>
+    </select>
+  </label><br><br>
   <label>题量（1-30，留空默认 10）：<input type="text" inputmode="numeric" autocomplete="off" name="count" value="10" size="6"></label><br><br>
   <button type="submit">开始练习</button>
 </form>
+<p><a href="/my-sessions">我的练习记录</a></p>
 <p class="meta"><a href="/teacher/login">老师入口</a></p>
+<script>
+var kp = document.querySelector('select[name="kp_name"]');
+var count = document.querySelector('input[name="count"]');
+function syncCountLimit() {
+  if (kp.value === "一元二次方程增长率") {
+    count.max = "7";
+    if (parseInt(count.value || "0", 10) > 7) count.value = "7";
+  } else {
+    count.removeAttribute("max");
+  }
+}
+kp.addEventListener("change", syncCountLimit);
+syncCountLimit();
+</script>
 </body>
 </html>

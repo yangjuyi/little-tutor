@@ -14,12 +14,18 @@ from app.domain.grading import validate_difficulty_params
 from app.domain.question_materialization import materialize_question
 
 DEFAULT_KP = "配方法解一元二次方程"
+GROWTH_KP = "一元二次方程增长率"
 SEED_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "seed_questions.json"
 PRIVATE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "private_questions"
 DEFAULT_KP_META = {
     "subject": "数学",
     "chapter": "一元二次方程",
     "concept": "通过配方将方程化为 (x+m)²=n 的形式求解",
+}
+GROWTH_KP_META = {
+    "subject": "数学",
+    "chapter": "一元二次方程",
+    "concept": "用 a(1+x)^n=b 模型解决平均增长率与降价率问题",
 }
 logger = logging.getLogger(__name__)
 
@@ -110,6 +116,13 @@ def load_private_questions() -> int:
     if PRIVATE_DIR.exists():
         for path in sorted(PRIVATE_DIR.glob("*.json")):
             try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            questions = payload.get("questions") or []
+            if not questions or not all("params" in item for item in questions):
+                continue
+            try:
                 added += load_seed_questions(
                     path=path, source="private", curated=True
                 )
@@ -119,4 +132,49 @@ def load_private_questions() -> int:
                     path.name,
                     exc.__class__.__name__,
                 )
+    return added
+
+
+def load_growth_real_exam_questions() -> int:
+    """Load the private real-exam growth suite into the main-chain catalog."""
+    from app.adapters.real_exam_bank import load_growth_main_chain_questions
+
+    init_db()
+    records = load_growth_main_chain_questions(0)
+    if not records:
+        return 0
+
+    added = 0
+    with SessionLocal() as s:
+        kp = s.query(KnowledgePoint).filter_by(kp_name=GROWTH_KP).first()
+        if kp is None:
+            kp = KnowledgePoint(kp_name=GROWTH_KP, **GROWTH_KP_META)
+            s.add(kp)
+            s.flush()
+        existing = {
+            row.stem: row
+            for row in s.query(Question).filter_by(source="private").all()
+        }
+        for record in records:
+            row = existing.get(record["stem"])
+            if row is not None:
+                row.kp_id = kp.id
+                row.answer = record["answer"]
+                row.analysis = record["analysis"]
+                row.difficulty = record["difficulty"]
+                row.params = record["params"]
+                continue
+            row = Question(
+                kp_id=kp.id,
+                stem=record["stem"],
+                answer=record["answer"],
+                analysis=record["analysis"],
+                difficulty=record["difficulty"],
+                source=record["source"],
+                params=record["params"],
+            )
+            s.add(row)
+            existing[record["stem"]] = row
+            added += 1
+        s.commit()
     return added

@@ -11,6 +11,7 @@ body{font-family:sans-serif;max-width:980px;margin:0 auto;padding:24px 18px;back
 .badge{display:inline-block;padding:3px 8px;border-radius:10px;background:#eef4ff;color:#1a5fb4;font-size:13px}
 .actions{margin-top:10px}
 a.btn{display:inline-block;text-decoration:none;background:#1a5fb4;color:#fff;border-radius:5px;padding:8px 12px}
+a.btn.secondary{background:#fff;color:#1a5fb4;border:1px solid #1a5fb4}
 .empty{color:#66707a}
 </style>
 </head>
@@ -22,8 +23,14 @@ a.btn{display:inline-block;text-decoration:none;background:#1a5fb4;color:#fff;bo
 <div class="card">
   <div><span class="badge">{{ state_labels.get(item.state, item.state) }}</span>
     <b>{{ item.student_name }}</b> · {{ item.kp_name }}</div>
-  <div class="meta">{{ item.session_id }} · {{ item.answered }}/{{ item.total }} 题 · {{ item.started_at }}</div>
-  <div class="actions"><a class="btn" href="/teacher/session/{{ item.session_id }}">打开会话</a></div>
+  <div class="meta">
+    {{ item.session_id }} · {{ item.answered }}/{{ item.total }} 题 · {{ item.started_at }}
+    {% if item.data_source != "real" %} · 测试数据{% endif %}
+  </div>
+  <div class="actions">
+    <a class="btn" href="/teacher/session/{{ item.session_id }}">打开会话</a>
+    <a class="btn secondary" href="/resume?session_id={{ item.session_id }}{% if item.resume_token %}&token={{ item.resume_token }}{% endif %}">学生端继续</a>
+  </div>
 </div>
 {% endfor %}
 {% else %}

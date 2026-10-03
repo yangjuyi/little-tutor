@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $session = "little-tutor-browser"
 $baseUrl = $env:TUTOR_BASE_URL
 if (-not $baseUrl) {
-    $baseUrl = "http://127.0.0.1:8010"
+    $baseUrl = "http://127.0.0.1:8020"
 }
 
 npx --yes --package @playwright/cli playwright-cli `

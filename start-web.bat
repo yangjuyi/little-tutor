@@ -1,6 +1,6 @@
 @echo off
 title little-tutor
-cd /d D:\python\learn\little-tutor
+cd /d "%~dp0"
 rem 已有实例在跑：直接开浏览器，避免端口冲突
 powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'http://127.0.0.1:8000/' -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop | Out-Null; exit 1 } catch { exit 0 }"
 if %errorlevel%==1 (

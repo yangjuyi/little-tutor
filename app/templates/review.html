@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 {% if waiting %}<meta http-equiv="refresh" content="3">{% endif %}
 <title>H1 组卷预审</title>
 <style>
@@ -39,6 +40,15 @@ button.primary{background:#1a5fb4;color:#fff;border:0;width:100%;padding:10px;fo
 {% else %}
 {% if busy %}<div class="warn">上一个操作还在生成中，请等它完成再操作。</div>{% endif %}
 {% if error_message %}<div class="warn">{{ error_message }}</div>{% endif %}
+{% if teaching_plan %}
+<div class="card">
+  <div class="idx">AI 训练计划建议（老师定稿后生效）</div>
+  <p>训练重点：{{ teaching_plan.target_skill }}</p>
+  <p class="meta">依据：{{ teaching_plan.weak_reasons | join('、') }}；建议题量：{{ teaching_plan.recommended_question_count }} 题</p>
+  <p class="meta">{{ teaching_plan.scaffold_strategy }}</p>
+  <p class="meta">状态：待老师确认；确认组卷后标记为已采纳。</p>
+</div>
+{% endif %}
 <div class="layout">
   <main>
   {% for c in candidates %}
@@ -58,6 +68,7 @@ button.primary{background:#1a5fb4;color:#fff;border:0;width:100%;padding:10px;fo
       · 题干校验：已通过
       {% endif %}
     </p>
+    {% if c.params.a is defined and c.params.b is defined and c.params.c is defined %}
     <form method="post" action="/teacher/review/edit">
       <input type="hidden" name="no" value="{{ c.index }}">
       <textarea name="stem" rows="3" style="width:100%;box-sizing:border-box;margin:6px 0">{{ c.stem }}</textarea>
@@ -77,6 +88,11 @@ button.primary{background:#1a5fb4;color:#fff;border:0;width:100%;padding:10px;fo
       <div class="meta">题目结构用于决定解析和校验方式，不是学生答案；不确定时保持原值。</div>
       <button type="submit">保存并重新计算</button>
     </form>
+    {% else %}
+    <div class="meta">
+      真实中考结构化题：使用程序题型契约校验答案与有效解；本阶段只允许换题或整体重组。
+    </div>
+    {% endif %}
   </div>
   {% endfor %}
   </main>

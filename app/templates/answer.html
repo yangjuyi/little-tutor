@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% if completed %}本次作答汇总{% else %}第 {{ idx + 1 }} 题{% endif %}</title>
 <style>
 body{font-family:sans-serif;max-width:760px;margin:0 auto;padding:16px;background:#f5f6f8;color:#222}
@@ -96,18 +97,40 @@ details.meta summary{cursor:pointer}
 </form>
 {% endif %}
 <form id="answer-form" method="post" action="/answer/{{ idx }}" autocomplete="off">
-{% for b in blanks %}
+{% if subquestion_sections %}
+{% for section in subquestion_sections %}
+<h2 style="font-size:18px;margin:22px 0 8px">第({{ section.id }})问 {{ section.prompt }}</h2>
+{% for b in section.blanks %}
   <div class="blank card">
     <span class="no">{{ loop.index }}</span><b>{{ b.basis }}</b><br>
     {% if b.kind == "choice" %}
       {% for opt in b.options %}
-        <label class="opt"><input type="radio" name="{{ b.id }}" value="{{ loop.index }}" required> {{ loop.index }}. {{ opt }}</label>
+        <label class="opt"><input type="radio" name="{{ b.id }}" value="{{ loop.index }}" required>
+          {% if b.option_labels %}{{ b.option_labels[loop.index0] }}{% else %}{{ loop.index }}{% endif %}. {{ opt }}
+        </label>
       {% endfor %}
     {% else %}
       <input type="text" name="{{ b.id }}" autocomplete="off" placeholder="填数值（分数可写 1/2）" required>
     {% endif %}
   </div>
 {% endfor %}
+{% endfor %}
+{% else %}
+{% for b in blanks %}
+  <div class="blank card">
+    <span class="no">{{ loop.index }}</span><b>{{ b.basis }}</b><br>
+    {% if b.kind == "choice" %}
+      {% for opt in b.options %}
+        <label class="opt"><input type="radio" name="{{ b.id }}" value="{{ loop.index }}" required>
+          {% if b.option_labels %}{{ b.option_labels[loop.index0] }}{% else %}{{ loop.index }}{% endif %}. {{ opt }}
+        </label>
+      {% endfor %}
+    {% else %}
+      <input type="text" name="{{ b.id }}" autocomplete="off" placeholder="填数值（分数可写 1/2）" required>
+    {% endif %}
+  </div>
+{% endfor %}
+{% endif %}
 {% if not blanks %}
   <div class="blank card">最终作答：<input type="text" name="final_answer" autocomplete="off" placeholder="x1=1, x2=-3"></div>
 {% endif %}
@@ -117,23 +140,29 @@ details.meta summary{cursor:pointer}
           formnovalidate>这题不会，先跳过</button>
 </div>
 </form>
+{% endif %}
 <script>
 document.querySelectorAll("form").forEach(function (form) {
-  form.addEventListener("submit", function () {
+  form.addEventListener("submit", function (event) {
+    var button = event.submitter || form.querySelector("button.submit");
+    if (!button) return;
     setTimeout(function () {
-      var b = form.querySelector("button.submit");
-      if (!b) return;
-      b.disabled = true;
-      var action = form.getAttribute("action");
-      b.textContent = action.startsWith("/hint/")
-        ? "获取提示…"
-        : action.startsWith("/scaffold/")
-          ? "生成分步帮助…"
-          : "批改中…（程序判分 + AI 归因，几秒到十几秒）";
+      button.disabled = true;
+      var action = button.getAttribute("formaction") || form.getAttribute("action") || "";
+      if (action.startsWith("/hint/")) {
+        button.textContent = "获取提示…";
+      } else if (action.startsWith("/scaffold/")) {
+        button.textContent = "生成分步帮助…";
+      } else if (action.startsWith("/skip/")) {
+        button.textContent = "正在跳过…";
+      } else if (action.startsWith("/summarize")) {
+        button.textContent = "提交给老师确认中…";
+      } else {
+        button.textContent = "批改中…（程序判分 + AI 归因，几秒到十几秒）";
+      }
     }, 0);
   });
 });
 </script>
-{% endif %}
 </body>
 </html>

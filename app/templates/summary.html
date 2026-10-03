@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>本次练习结果确认</title>
 <style>
 body{font-family:sans-serif;max-width:720px;margin:40px auto;padding:0 16px;color:#222}
@@ -24,6 +25,9 @@ button{font-size:16px;padding:9px 14px;border-radius:5px;cursor:pointer}
 <h1>本次练习结果确认</h1>
 <p><a href="/teacher/sessions">切换会话</a></p>
 <p>系统根据本次练习表现，建议更新该知识点的掌握程度。请老师确认是否写入学生画像。</p>
+{% if error_message %}
+<div class="note bad">审批未生效：{{ error_message }}</div>
+{% endif %}
 <form method="post" action="/teacher/summary">
 {% for p in proposals %}
 {% set correct_count = p.correct_count if p.correct_count is defined else ((p.round_count * p.session_rate) | round(0) | int) %}
@@ -61,6 +65,7 @@ button{font-size:16px;padding:9px 14px;border-radius:5px;cursor:pointer}
 {% if round_results %}
 <h2 style="font-size:19px;margin-top:24px">题级归因证据</h2>
 {% for result in round_results %}
+{% set result_index = loop.index0 %}
 <div class="card">
   <div class="row">
     <span class="label">第 {{ loop.index }} 题</span>
@@ -74,6 +79,32 @@ button{font-size:16px;padding:9px 14px;border-radius:5px;cursor:pointer}
       {% endif %}
     </b>
   </div>
+  <div class="row">
+    <span class="label">老师确认最终结果</span>
+    <select name="result_{{ result_index }}">
+      <option value="keep">保持程序初评</option>
+      <option value="correct">确认正确</option>
+      <option value="wrong">确认错误</option>
+    </select>
+  </div>
+  {% if result.subquestion_results %}
+  <div class="note" style="margin-top:10px">
+    <b>子问题结果</b>
+    {% for subquestion in result.subquestion_results %}
+    <div class="row">
+      <span class="label">
+        第({{ subquestion.id }})问 {{ subquestion.prompt }}
+        · 程序初评：{{ "正确" if subquestion.is_correct else "错误" }}
+      </span>
+      <select name="subresult_{{ result_index }}_{{ subquestion.id }}">
+        <option value="keep">保持程序初评</option>
+        <option value="correct">确认正确</option>
+        <option value="wrong">确认错误</option>
+      </select>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
   <div style="margin:8px 0;color:#444">{{ questions[loop.index0].stem }}</div>
   {% if result.error.program_breakpoint %}
   <div class="note">{{ result.error.program_breakpoint }}</div>

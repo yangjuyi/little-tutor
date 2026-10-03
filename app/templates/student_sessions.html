@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>我的练习记录</title>
+<style>
+body{font-family:sans-serif;max-width:820px;margin:32px auto;padding:0 16px;background:#f5f6f8;color:#222}
+h1{font-size:24px}
+.card{background:#fff;border:1px solid #dfe3e7;border-radius:8px;padding:14px 16px;margin:12px 0}
+.meta{color:#66707a;font-size:14px;line-height:1.5}
+.badge{display:inline-block;padding:3px 8px;border-radius:10px;background:#eef4ff;color:#1a5fb4;font-size:13px}
+.actions{margin-top:10px}
+a.btn{display:inline-block;text-decoration:none;background:#1a5fb4;color:#fff;border-radius:5px;padding:8px 12px}
+.empty{color:#66707a}
+</style>
+</head>
+<body>
+<h1>我的练习记录</h1>
+<p class="meta"><a href="/">返回首页</a></p>
+{% if sessions %}
+{% for item in sessions %}
+<div class="card">
+  <div>
+    <span class="badge">{{ state_labels.get(item.state, item.state) }}</span>
+    <b>{{ item.kp_name }}</b>
+  </div>
+  <div class="meta">{{ item.started_at }} · 已答 {{ item.answered }}/{{ item.total }} 题</div>
+  <div class="actions">
+    <a class="btn" href="{{ item.resume_url }}">
+      {% if item.state == "done" %}查看小结{% else %}继续这场练习{% endif %}
+    </a>
+  </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="card empty">还没有练习记录。</div>
+{% endif %}
+</body>
+</html>

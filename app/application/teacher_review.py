@@ -1,9 +1,8 @@
 """老师审核画像建议的应用用例。"""
 
 from app.adapters.review_store import (
-    apply_to_db,
+    persist_teacher_review,
     record_answer,
-    record_teacher_decision,
 )
 from app.application.profile_evidence import propose_mastery_change
 
@@ -49,12 +48,10 @@ def persist_review(
         session_id,
         attempt_no=attempt_no,
     )
-    record_teacher_decision(
+    persist_teacher_review(
         student_id,
-        proposal,
+        [proposal],
         decision,
         session_id,
-        str(question.get("id") or "") or None,
+        question_id=str(question.get("id") or "") or None,
     )
-    if decision == "accept":
-        apply_to_db(student_id, proposal)

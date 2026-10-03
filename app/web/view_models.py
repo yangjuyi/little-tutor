@@ -14,13 +14,22 @@ _MASTERY_SCORES = {
 }
 
 
+def _effective_is_correct(result: dict) -> bool:
+    return bool(
+        result.get(
+            "effective_is_correct",
+            result.get("is_correct"),
+        )
+    )
+
+
 def build_done_context(values: dict) -> dict:
     """把会话事实整理为完成页图表数据。"""
     rounds = list(values.get("round_results") or [])
     proposals = list(values.get("session_proposals") or [])
     proposal = proposals[0] if proposals else {}
     total = len(rounds)
-    correct = sum(1 for result in rounds if result.get("is_correct"))
+    correct = sum(1 for result in rounds if _effective_is_correct(result))
     wrong = total - correct
     process_error_count = sum(
         1
@@ -38,7 +47,7 @@ def build_done_context(values: dict) -> dict:
     error_counts = {error_type: 0 for error_type in _ERROR_TYPES}
     unattributed_count = 0
     for result in rounds:
-        if result.get("is_correct"):
+        if _effective_is_correct(result):
             continue
         error = result.get("error") or {}
         if error.get("evidence_source") != "llm":

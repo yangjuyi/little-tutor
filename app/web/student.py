@@ -5,11 +5,13 @@ from fastapi.responses import RedirectResponse
 from urllib.parse import quote
 
 from app.application import student_practice as practice
+from app.web.auth import valid_resume_token
 from app.web.dependencies import templates
 from app.web.view_models import build_done_context
 
 
 router = APIRouter()
+STUDENT_COOKIE_MAX_AGE = 60 * 60 * 24 * 30
 
 
 def _thread(request: Request) -> str | None:
@@ -27,11 +29,81 @@ def index(request: Request):
     )
 
 
+@router.get("/resume")
+def resume_session(
+    request: Request,
+    session_id: str = "",
+    token: str = "",
+):
+    session_id = session_id.strip()
+    if not session_id:
+        return RedirectResponse("/my-sessions", status_code=303)
+    owner = practice.student_session_owner(session_id)
+    cookie_owner = request.cookies.get("student_id")
+    if owner is None:
+        return RedirectResponse("/", status_code=303)
+    if (
+        cookie_owner != owner
+        and not valid_resume_token(session_id, token)
+    ):
+        return RedirectResponse("/?error=resume_denied", status_code=303)
+    view = practice.resume_student_session(session_id)
+    if view["kind"] == "error":
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            {"message": view["message"], "retry_url": "/resume"},
+        )
+    response = RedirectResponse(view["location"], status_code=303)
+    response.set_cookie(
+        "thread_id",
+        session_id,
+        httponly=True,
+        samesite="lax",
+    )
+    if view.get("student_id"):
+        response.set_cookie(
+            "student_id",
+            view["student_id"],
+            httponly=True,
+            samesite="lax",
+            max_age=STUDENT_COOKIE_MAX_AGE,
+        )
+    return response
+
+
+@router.get("/my-sessions")
+def my_sessions(request: Request):
+    sessions = practice.list_student_sessions(
+        request.cookies.get("student_id")
+    )
+    labels = {
+        "pending_review": "等待老师定稿",
+        "in_progress": "答题中",
+        "pending_confirmation": "等待老师确认",
+        "done": "已完成",
+        "waiting": "处理中",
+        "aborted": "已中断，可继续",
+    }
+    return templates.TemplateResponse(
+        request,
+        "student_sessions.html",
+        {
+            "sessions": sessions,
+            "state_labels": labels,
+        },
+    )
+
+
 @router.post("/start")
-def start(request: Request, count: str = Form("")):
+def start(
+    request: Request,
+    count: str = Form(""),
+    kp_name: str = Form(""),
+):
     try:
         result = practice.start_practice(
-            request.cookies.get("student_id"), count
+            request.cookies.get("student_id"), count, kp_name
         )
     except practice.PracticeBusy:
         return RedirectResponse("/", status_code=303)
@@ -41,7 +113,11 @@ def start(request: Request, count: str = Form("")):
         )
     response = RedirectResponse("/waiting", status_code=303)
     response.set_cookie(
-        "student_id", result["student_id"], httponly=True, samesite="lax"
+        "student_id",
+        result["student_id"],
+        httponly=True,
+        samesite="lax",
+        max_age=STUDENT_COOKIE_MAX_AGE,
     )
     response.set_cookie(
         "thread_id", result["thread_id"], httponly=True, samesite="lax"
@@ -107,6 +183,7 @@ def answer_page(request: Request, idx: int):
             "scaffold_level": view["scaffold_level"],
             "scaffold": view["scaffold"],
             "blanks": view["blanks"],
+            "subquestion_sections": view["subquestion_sections"],
             "busy": request.query_params.get("busy") == "1",
             "completed": False,
         },
@@ -184,10 +261,10 @@ def summarize_trigger(request: Request):
     if thread is None:
         return RedirectResponse("/", status_code=303)
     try:
-        practice.trigger_summary(thread)
+        result = practice.trigger_summary(thread)
     except practice.PracticeBusy:
         return RedirectResponse("/waiting-confirmation", status_code=303)
-    return RedirectResponse("/waiting-confirmation", status_code=303)
+    return RedirectResponse(result["location"], status_code=303)
 
 
 @router.get("/waiting-confirmation")
@@ -204,6 +281,8 @@ def waiting_confirmation(request: Request):
         )
     if view["kind"] == "done":
         return RedirectResponse("/done", status_code=303)
+    if view["kind"] == "redirect":
+        return RedirectResponse(view["location"], status_code=303)
     return templates.TemplateResponse(request, "confirmation_wait.html", {})
 
 

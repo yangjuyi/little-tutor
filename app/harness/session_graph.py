@@ -3,14 +3,14 @@
 节点序列（2026-09-09 审计后定稿）：
     read_profile → generate_question_set（按掌握度混难度 + 挑库优先，
         缺库槽位用 Send 扇出并发生成设计题）→ H1 组卷预审(interrupt①，
-        approve/swap/regroup 循环) → 单题循环×N（批改子图：程序判分 +
-        AI 归因 + 逐空断点 + 事实落库，零打断）→ summarize_profile
+        approve/swap/regroup 循环) → 单题循环×N（批改子图：程序事实 →
+        LLM 归因建议 → 合并 → 事实落库，零打断）→ summarize_profile
         → H3 批量确认(interrupt②) → write_back
 
 P2 落地项：
 - Send 扇出：组卷中缺库槽位用程序化设计器并发生成（LangGraph Send），
   每任务产出一条 generated 记录（reducer 累加），check_assemble 汇合
-- 子图：单题批改管线（判分→逐空断点→落库）编译为子图挂入主图，
+- 子图：单题批改管线（程序判分→归因建议→合并→落库）编译为子图挂入主图，
   状态隔离、只通过共享键读写
 - LLM 兜底：生成/归因异常不炸图——批改子图降级为"仅程序证据"，
   组卷失败置 llm_error 走 failed 节点，CLI/Web 据此提示重试
@@ -19,25 +19,22 @@ P2 落地项：
 """
 
 import random
-from typing import Optional, TypedDict
 
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command, interrupt
 
-from app.adapters.llm import get_llm, grade_question
 from app.adapters.checkpoint import default_checkpointer
-from app.adapters.persistence import Question as QuestionRow, SessionLocal
+from app.adapters.persistence import (
+    AnswerRecord,
+    Question as QuestionRow,
+    SessionLocal,
+)
 from app.adapters.review_store import (
-    apply_to_db,
-    correct_error_type,
-    record_answer,
-    record_teacher_decision,
+    persist_teacher_review_bundle,
 )
 from app.adapters.session_store import (
     abort_practice_session,
     complete_practice_session,
-    mark_practice_session_test,
-    review_practice_session,
 )
 from app.application.profile_evidence import propose_mastery_change
 from app.domain.adaptation import (
@@ -45,9 +42,15 @@ from app.domain.adaptation import (
     order_questions_for_target,
     select_next_target,
 )
-from app.domain.answer_template import breakpoint_label, judge_blanks
+from app.domain.assessment.subquestions import combine_subquestion_results
 from app.domain.grading import (
+    difficulty_ratios_percent,
     pick_difficulty,
+)
+from app.domain.teaching_plan import (
+    build_teaching_plan,
+    build_training_focus,
+    rank_questions_for_focus,
 )
 from app.domain.question_design import build_designed_question
 from app.domain.question_edit import recompute_edited_question
@@ -65,6 +68,10 @@ from app.harness.question_assembly import (
     seed_candidate as _seed_candidate,
 )
 from app.harness.state import SessionState
+from app.harness.grade_pipeline import (
+    _validate_grade_input_node,
+    grade_pipeline,
+)
 
 
 def read_profile_node(state: SessionState) -> dict:
@@ -90,15 +97,43 @@ def read_profile_node(state: SessionState) -> dict:
             "kp_id": state["kp_id"], "level": row.level,
             "confidence": row.confidence, "evidence": row.last_status or "",
         }
-    return {"profile_snapshot": snapshot}
+    training_focus = None
+    with SessionLocal() as s:
+        latest_error = (
+            s.query(AnswerRecord.error_type, QuestionRow.params)
+            .join(QuestionRow, QuestionRow.id == AnswerRecord.question_id)
+            .filter(
+                AnswerRecord.student_id == int(state["student_id"]),
+                QuestionRow.kp_id == int(state["kp_id"]),
+            )
+            .order_by(AnswerRecord.created_at.desc())
+            .first()
+        )
+    if latest_error is not None:
+        training_focus = build_training_focus(
+            latest_error[0],
+            (latest_error[1] or {}).get("design_id"),
+        )
+    return {
+        "profile_snapshot": snapshot,
+        "difficulty_ratios": difficulty_ratios_percent(
+            snapshot["level"]
+        ),
+        "training_focus": training_focus,
+        "focus_remaining": 2 if training_focus else 0,
+        "teaching_plan": build_teaching_plan(training_focus),
+    }
 
 
 def _select_question_from_pool(
     pool: list[dict],
     used_ids: set,
     target: str,
+    focus: dict | None = None,
 ) -> dict | None:
-    for question in order_questions_for_target(pool, target):
+    candidates = order_questions_for_target(pool, target)
+    candidates = rank_questions_for_focus(candidates, focus)
+    for question in candidates:
         if question.get("id") not in used_ids:
             return question
     return None
@@ -153,8 +188,17 @@ def h1_review_node(state: SessionState) -> dict:
         "candidates": payload,
         "actions": "approve / swap:序号 / regroup:重组意图",
         "validation_error": state.get("h1_validation_error"),
+        "training_focus": state.get("training_focus"),
+        "teaching_plan": state.get("teaching_plan"),
     })
-    action, arg = _parse_h1_decision(decision)
+    try:
+        action, arg = _parse_h1_decision(decision)
+    except (KeyError, TypeError, ValueError) as exc:
+        return {
+            "h1_decision": "edit_error",
+            "teacher_instruction": None,
+            "h1_validation_error": str(exc),
+        }
     updates = {
         "h1_decision": action,
         "teacher_instruction": arg,
@@ -205,6 +249,10 @@ def h1_review_node(state: SessionState) -> dict:
             "approved_pool": approved,
             "phase": "answer",
         })
+        teaching_plan = dict(state.get("teaching_plan") or {})
+        if teaching_plan:
+            teaching_plan["teacher_review_status"] = "accepted"
+            updates["teaching_plan"] = teaching_plan
         if approved:
             initial_target = pick_difficulty(state["profile_snapshot"]["level"])
             initial = _select_question_from_pool(
@@ -231,9 +279,7 @@ def route_after_h1(state: SessionState) -> str:
         "edit_error": "h1_review",
         "swap": "regen_one",
         "regroup": "regen_all",
-    }[
-        state["h1_decision"]
-    ]
+    }.get(state.get("h1_decision"), "failed")
 
 
 def regen_one_node(state: SessionState) -> dict:
@@ -300,106 +346,6 @@ def failed_node(state: SessionState) -> dict:
     return {"phase": "done"}
 
 
-# ---------- 批改子图（P2：compiled subgraph，状态隔离、共享键读写）----------
-
-class GradeState(TypedDict):
-    """子图只认这几个键；与主图 SessionState 以共享键衔接"""
-    student_id: str
-    session_id: Optional[str]
-    current_question: dict
-    template: Optional[dict]
-    student_steps: list
-    attempt_no: int
-    assistance_level: Optional[str]
-    hint_count: int
-    scaffold_level: int
-    skip: bool
-    result: Optional[dict]
-
-
-def _grade_compute_node(state: GradeState) -> dict:
-    if state.get("skip"):
-        question = state["current_question"]
-        result = {
-            "question_id": question["id"],
-            "is_correct": False,
-            "final_answer_correct": False,
-            "process_correct": False,
-            "error": {
-                "error_type": "未归因",
-                "error_kp_id": question["kp_id"],
-                "confidence": 0.0,
-                "evidence": "学生选择跳过本题，未形成作答证据",
-                "evidence_source": "program",
-                "ai_certain": False,
-                "teacher_reviewed": False,
-                "steps_analyzed": 0,
-                "insufficient_evidence": True,
-                "program_breakpoint": "学生选择跳过本题",
-            },
-            "steps": [],
-        }
-    else:
-        result = grade_question(
-            state["current_question"], state["student_steps"], get_llm("grade")
-        )
-    final_answer_correct = bool(result["is_correct"])
-    result["final_answer_correct"] = final_answer_correct
-    result["process_correct"] = True
-    result["difficulty"] = state["current_question"].get("difficulty")
-    result["attempt_no"] = int(state.get("attempt_no") or 1)
-    result["assistance_level"] = (
-        "skipped"
-        if state.get("skip")
-        else state.get("assistance_level") or "independent"
-    )
-    result["hint_count"] = int(state.get("hint_count") or 0)
-    result["scaffold_level"] = int(state.get("scaffold_level") or 0)
-    template = state.get("template")
-    if template:
-        blank_results = judge_blanks(template, state["student_steps"])
-        result["blank_results"] = blank_results
-        breakpoint = breakpoint_label(blank_results)
-        result["process_correct"] = breakpoint is None
-        if breakpoint:
-            result["is_correct"] = False
-            result["error"]["program_breakpoint"] = (
-                f"程序定位断点：{breakpoint}"
-            )
-            if result["error"]["error_type"] == "无错":
-                result["error"].update({
-                    "error_type": "未归因",
-                    "confidence": 0.0,
-                    "evidence": "最终答案正确，但中间步骤存在错误，待老师确认",
-                    "evidence_source": "program",
-                    "insufficient_evidence": False,
-                })
-    return {"result": result}
-
-
-def _record_fact_node(state: GradeState) -> dict:
-    """事实当轮落库（§16.2：单题循环内写 answer_record，带 session_id）"""
-    record_answer(
-        state["student_id"], state["current_question"],
-        state["result"], state.get("session_id"),
-        attempt_no=int(state.get("attempt_no") or 1),
-        hint_count=int(state.get("hint_count") or 0),
-        scaffold_level=int(state.get("scaffold_level") or 0),
-    )
-    return {}
-
-
-grade_pipeline = (
-    StateGraph(GradeState)
-    .add_node("grade_compute", _grade_compute_node)
-    .add_node("record_fact", _record_fact_node)
-    .add_edge(START, "grade_compute")
-    .add_edge("grade_compute", "record_fact")
-    .add_edge("record_fact", END)
-    .compile()
-)
-
-
 def collect_round_node(state: SessionState) -> dict:
     rounds = list(state.get("round_results") or [])
     if state.get("result"):
@@ -412,11 +358,28 @@ def collect_round_node(state: SessionState) -> dict:
         or (rounds[-1].get("difficulty") if rounds else None)
         or "simple"
     )
+    last_result = state.get("result") or {}
+    last_error = last_result.get("error") or {}
+    new_focus = build_training_focus(
+        last_error.get("error_type"),
+        (state.get("current_question") or {}).get("params", {}).get("design_id"),
+    )
+    previous_focus = state.get("training_focus")
+    previous_remaining = int(state.get("focus_remaining") or 0)
+    if new_focus:
+        training_focus = new_focus
+        focus_remaining = 2
+    elif previous_focus and previous_remaining > 1:
+        training_focus = previous_focus
+        focus_remaining = previous_remaining - 1
+    else:
+        training_focus = None
+        focus_remaining = 0
     next_target = select_next_target(current_target, rounds)
     if len(selected) < question_count:
         used_ids = {question.get("id") for question in selected}
         next_question = _select_question_from_pool(
-            pool, used_ids, next_target
+            pool, used_ids, next_target, training_focus
         )
         if next_question is not None:
             selected.append(next_question)
@@ -425,6 +388,9 @@ def collect_round_node(state: SessionState) -> dict:
         "round_results": rounds,
         "approved_questions": selected,
         "adaptive_target": next_target,
+        "training_focus": training_focus,
+        "focus_remaining": focus_remaining,
+        "teaching_plan": build_teaching_plan(training_focus),
         "hint_level": 0,
         "scaffold_level": 0,
         "skip": False,
@@ -466,13 +432,19 @@ def summarize_profile_node(state: SessionState) -> dict:
 
 
 def h3_write_back_node(state: SessionState) -> dict:
-    """H3 批量确认（interrupt②）：允许老师修正等级、错因和测试标记。"""
+    """H3 批量确认：老师可修正对错、等级、错因和测试标记。"""
     raw_decision = interrupt({
         "proposals": state["session_proposals"],
-        "actions": "accept / reject / correct error type / mark test session",
+        "validation_error": state.get("h3_validation_error"),
+        "actions": (
+            "accept / reject / override result / correct error type / "
+            "mark test session"
+        ),
     })
     corrections: dict[str, str] = {}
     error_corrections: dict[str, str] = {}
+    result_corrections: dict[str, str] = {}
+    subquestion_corrections: dict[str, str] = {}
     test_mode = False
     if isinstance(raw_decision, dict):
         text = str(raw_decision.get("decision") or "").strip().lower()
@@ -484,35 +456,158 @@ def h3_write_back_node(state: SessionState) -> dict:
             str(key): str(value)
             for key, value in (raw_decision.get("error_corrections") or {}).items()
         }
+        result_corrections = {
+            str(key): str(value)
+            for key, value in (raw_decision.get("result_corrections") or {}).items()
+        }
+        subquestion_corrections = {
+            str(key): str(value)
+            for key, value in (
+                raw_decision.get("subquestion_corrections") or {}
+            ).items()
+        }
         test_mode = bool(raw_decision.get("test_mode"))
     else:
         text = str(raw_decision or "").strip().lower()
     if text not in ("accept", "reject"):
-        raise ValueError("H3 决策必须是 accept / reject")
-    proposals = []
-    for original in state["session_proposals"]:
-        proposal = dict(original)
-        corrected = corrections.get(str(proposal["kp_id"]))
-        if corrected:
-            if corrected not in ("weak", "mid", "strong"):
-                raise ValueError("修正掌握度必须是 weak / mid / strong")
-            proposal["suggest_level"] = corrected
-            proposal["teacher_corrected"] = True
-        proposals.append(proposal)
-    if text == "accept" and not test_mode:
-        for proposal in proposals:
-            apply_to_db(state["student_id"], proposal)
+        return Command(
+            update={
+                "h3_validation_error": "H3 决策必须是 accept / reject",
+            },
+            goto="h3_write_back",
+        )
 
     round_results = [
         dict(result) for result in (state.get("round_results") or [])
     ]
     questions = state.get("approved_questions") or []
+    overrides: list[dict] = []
+    error_edits: list[dict] = []
     for idx, result in enumerate(round_results):
+        subquestion_results = [
+            dict(item)
+            for item in (result.get("subquestion_results") or [])
+        ]
+        subquestion_changed = False
+        for subquestion in subquestion_results:
+            key = f"{idx}:{subquestion['id']}"
+            correction = subquestion_corrections.get(key)
+            if not correction:
+                continue
+            if correction not in ("keep", "correct", "wrong"):
+                return Command(
+                    update={
+                        "h3_validation_error": (
+                            f"修正子问题结果非法：{correction}"
+                        ),
+                    },
+                    goto="h3_write_back",
+                )
+            if correction == "keep":
+                subquestion["teacher_is_correct"] = None
+                subquestion["effective_is_correct"] = bool(
+                    subquestion.get("is_correct")
+                )
+            else:
+                effective = correction == "correct"
+                subquestion["teacher_is_correct"] = effective
+                subquestion["effective_is_correct"] = effective
+            subquestion_changed = True
+        if subquestion_results:
+            result["subquestion_results"] = subquestion_results
+
+        result_correction = result_corrections.get(str(idx))
+        if result_correction and result_correction not in (
+            "keep", "correct", "wrong",
+        ):
+            return Command(
+                update={
+                    "h3_validation_error": (
+                        f"修正对错非法：{result_correction}"
+                    ),
+                },
+                goto="h3_write_back",
+            )
+        effective_is_correct = (
+            combine_subquestion_results(subquestion_results)
+            if subquestion_results
+            else bool(result.get("is_correct"))
+        )
+        if result_correction == "correct":
+            effective_is_correct = True
+        elif result_correction == "wrong":
+            effective_is_correct = False
+        result["effective_is_correct"] = effective_is_correct
+        result["teacher_is_correct"] = (
+            effective_is_correct
+            if result_correction in ("correct", "wrong")
+            else None
+        )
+        if result_correction in ("correct", "wrong") or subquestion_changed:
+            question = questions[idx] if idx < len(questions) else {}
+            overrides.append({
+                "question_id": str(question.get("id")),
+                "kp_id": str(question.get("kp_id")),
+                "after": effective_is_correct,
+                "subquestion_results": subquestion_results or None,
+            })
+        if subquestion_changed:
+            error = dict(result.get("error") or {})
+            if effective_is_correct:
+                error.update({
+                    "error_type": "无错",
+                    "confidence": 1.0,
+                    "evidence": "老师确认各子问题最终结果正确",
+                    "teacher_reviewed": True,
+                    "teacher_corrected": True,
+                    "insufficient_evidence": False,
+                })
+            elif error.get("error_type") == "无错":
+                error.update({
+                    "error_type": "未归因",
+                    "confidence": 0.0,
+                    "evidence": "老师确认存在错误子问题，具体错因待补充",
+                    "teacher_reviewed": True,
+                    "teacher_corrected": True,
+                    "insufficient_evidence": True,
+                })
+            result["error"] = error
+        if result_correction in ("correct", "wrong"):
+            error = dict(result.get("error") or {})
+            if effective_is_correct:
+                error.update({
+                    "error_type": "无错",
+                    "confidence": 1.0,
+                    "evidence": "老师确认本题最终结果正确",
+                    "teacher_reviewed": True,
+                    "teacher_corrected": True,
+                    "insufficient_evidence": False,
+                })
+            elif error.get("error_type") == "无错":
+                error.update({
+                    "error_type": "未归因",
+                    "confidence": 0.0,
+                    "evidence": "老师确认本题最终结果错误，具体错因待补充",
+                    "teacher_reviewed": True,
+                    "teacher_corrected": True,
+                    "insufficient_evidence": True,
+                })
+            result["error"] = error
+
+        if effective_is_correct:
+            continue
         corrected = error_corrections.get(str(idx))
         if not corrected:
             continue
         if corrected not in ERROR_TYPE_OPTIONS:
-            raise ValueError(f"修正错因非法：{corrected}")
+            return Command(
+                update={
+                    "h3_validation_error": (
+                        f"修正错因非法：{corrected}"
+                    ),
+                },
+                goto="h3_write_back",
+            )
         error = dict(result.get("error") or {})
         before = error.get("error_type")
         if corrected == before:
@@ -522,31 +617,74 @@ def h3_write_back_node(state: SessionState) -> dict:
         error["teacher_reviewed"] = True
         result["error"] = error
         question = questions[idx] if idx < len(questions) else {}
-        correct_error_type(
-            state["student_id"],
-            str(question.get("id")),
-            str(question.get("kp_id")),
-            state.get("session_id"),
-            str(before) if before is not None else None,
-            corrected,
-        )
+        error_edits.append({
+            "question_id": str(question.get("id")),
+            "kp_id": str(question.get("kp_id")),
+            "before": str(before) if before is not None else None,
+            "after": corrected,
+        })
 
-    if test_mode:
-        mark_practice_session_test(str(state["session_id"]))
+    weighted_rate = evidence_weighted_rate(round_results)
+    proposals = []
+    by_kp: dict[str, list] = {}
+    for result in round_results:
+        by_kp.setdefault(str(result["error"]["error_kp_id"]), []).append(result)
+    for kp_id, results in by_kp.items():
+        total = len(results)
+        correct = sum(
+            1 for result in results
+            if result.get("effective_is_correct", result.get("is_correct"))
+        )
+        rate = correct / total if total else 0.0
+        proposal = propose_mastery_change(
+            int(state["student_id"]),
+            int(kp_id),
+            current_rate=weighted_rate,
+        )
+        proposal.update({
+            "kp_id": kp_id,
+            "kp_name": state.get("kp_name") or f"知识点 {kp_id}",
+            "correct_count": correct,
+            "confirmed_wrong_count_delta": total - correct,
+            "session_rate": round(rate, 4),
+            "weighted_rate": weighted_rate,
+            "round_count": total,
+            "adaptive_target": state.get("adaptive_target"),
+            "reason": "老师确认后的有效作答结果",
+        })
+        proposals.append(proposal)
 
     for proposal in proposals:
-        record_teacher_decision(
-            state["student_id"], proposal, text,
-            state.get("session_id"), None,
-            note="测试会话" if test_mode else None,
-        )
-    review_practice_session(
-        str(state["session_id"]),
-        "accepted" if text == "accept" else "rejected",
+        corrected = corrections.get(str(proposal["kp_id"]))
+        if corrected:
+            if corrected not in ("weak", "mid", "strong"):
+                return Command(
+                    update={
+                        "h3_validation_error": (
+                            "修正掌握度必须是 weak / mid / strong"
+                        ),
+                    },
+                    goto="h3_write_back",
+                )
+            proposal["suggest_level"] = corrected
+            proposal["teacher_corrected"] = True
+
+    persist_teacher_review_bundle(
+        state["student_id"],
+        proposals,
+        text,
+        state.get("session_id"),
+        overrides=overrides,
+        error_edits=error_edits,
+        note="测试会话" if test_mode else None,
+        apply_mastery=not test_mode,
+        test_mode=test_mode,
+        review_decision="accepted" if text == "accept" else "rejected",
     )
     return {
         "session_proposals": proposals,
         "h3_decision": text,
+        "h3_validation_error": None,
         "test_session": test_mode,
         "round_results": round_results,
         "phase": "done",
@@ -554,10 +692,18 @@ def h3_write_back_node(state: SessionState) -> dict:
 
 
 def route_by_phase(state: SessionState) -> str:
-    return {
-        "grade_round": "grade_round",
-        "summarize": "summarize_profile",
-    }.get(state.get("phase"), "read_profile")
+    phase = state.get("phase")
+    if phase == "grade_round":
+        return "grade_round"
+    if phase == "summarize":
+        return "summarize_profile"
+    if phase == "assemble":
+        return "read_profile"
+    return "failed"
+
+
+def route_after_grade_round(state: SessionState) -> str:
+    return "failed" if state.get("llm_error") else "collect_round"
 
 
 def build_session_graph(checkpointer=None):
@@ -592,8 +738,12 @@ def build_session_graph(checkpointer=None):
         "h1_review": "h1_review",
         "regen_one": "regen_one",
         "regen_all": "regen_all",
+        "failed": "failed",
     })
-    graph.add_edge("grade_round", "collect_round")
+    graph.add_conditional_edges("grade_round", route_after_grade_round, {
+        "collect_round": "collect_round",
+        "failed": "failed",
+    })
     graph.add_edge("collect_round", END)
     graph.add_edge("summarize_profile", "h3_write_back")
     graph.add_edge("h3_write_back", END)

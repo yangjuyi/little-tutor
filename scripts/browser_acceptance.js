@@ -1,6 +1,8 @@
 async (page) => {
-  const baseUrl = "http://127.0.0.1:8010";
-  const teacherToken = "verify-teacher";
+  const baseUrl =
+    (typeof process !== "undefined" && process.env.TUTOR_BASE_URL) ||
+    "http://127.0.0.1:8020";
+  const teacherToken = "evidence-teacher";
   const assert = (condition, message) => {
     if (!condition) throw new Error(message);
   };
@@ -92,6 +94,16 @@ async (page) => {
     await mobile.getByRole("button", { name: "开始练习" }).isVisible(),
     "手机首页开始按钮不可见"
   );
+  assert(
+    await mobile.getByRole("link", { name: "我的练习记录" }).isVisible(),
+    "手机首页历史入口不可见"
+  );
+  await mobile.getByRole("link", { name: "我的练习记录" }).click();
+  await mobile.getByText("我的练习记录").waitFor();
+  const historyOverflow = await mobile.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth + 1
+  );
+  assert(!historyOverflow, "手机历史页出现横向滚动");
 
   await summary.close();
   await mobile.close();

@@ -16,6 +16,7 @@ from app.domain.grading import (
 )
 from app.domain.question_design import build_designed_question
 from app.domain.question_materialization import materialize_question
+from app.domain.assessment import get_question_handler
 from app.harness.state import SessionState
 
 
@@ -107,6 +108,18 @@ def seed_candidate(row: QuestionRow, kp_id: str) -> dict:
 def is_selectable_seed(row: QuestionRow) -> bool:
     """题库质量闸门：拒绝旧题、脏参数和无法物化的题。"""
     params = dict(row.params or {})
+    handler = get_question_handler(params)
+    if handler is not None:
+        try:
+            materialize_question({
+                "stem": row.stem,
+                "answer": row.answer,
+                "analysis": row.analysis,
+                "params": params,
+            })
+        except (TypeError, ValueError):
+            return False
+        return True
     try:
         a, b, c = float(params["a"]), float(params["b"]), float(params["c"])
     except (KeyError, TypeError, ValueError):
@@ -157,9 +170,19 @@ def plan_assembly(
     kp_id = state["kp_id"]
     kp_name = state.get("kp_name") or ""
     pool_count = int(state.get("question_count") or 10) * 2
-    weights = dict(bias) if bias else {
-        difficulty: weight for difficulty, weight in DIFFICULTY_RATIOS[level]
-    }
+    if bias:
+        weights = dict(bias)
+    elif state.get("difficulty_ratios"):
+        stored = dict(state["difficulty_ratios"])
+        weights = {
+            difficulty: float(stored.get(difficulty, 0)) / 100
+            for difficulty in ("simple", "mid", "hard")
+        }
+    else:
+        weights = {
+            difficulty: weight
+            for difficulty, weight in DIFFICULTY_RATIOS[level]
+        }
     difficulty_counts = allocate_difficulty_counts(pool_count, weights)
     difficulties = [
         difficulty
@@ -246,33 +269,89 @@ def gen_candidate_node(payload: dict) -> dict:
 def check_assemble_node(state: SessionState) -> dict:
     if state.get("llm_error"):
         return {"phase": "done"}
-    generated = {
-        item["index"]: item["question"]
-        for item in state.get("generated") or []
-        if item["plan_id"] == state.get("plan_id")
-    }
+    generated = {}
+    for item in state.get("generated") or []:
+        if item.get("plan_id") != state.get("plan_id"):
+            continue
+        index = item.get("index")
+        if index in generated:
+            return {
+                "llm_error": f"组卷结果出现重复索引：{index}",
+                "phase": "done",
+            }
+        generated[index] = item.get("question")
     candidates = []
     for slot in state.get("plan") or []:
         if slot["seed"] is not None:
             candidates.append(slot["seed"])
         else:
-            candidates.append(generated[slot["index"]])
+            question = generated.get(slot["index"])
+            if question is None:
+                return {
+                    "llm_error": (
+                        f"组卷结果缺少计划索引：{slot['index']}"
+                    ),
+                    "phase": "done",
+                }
+            candidates.append(question)
     seen = set()
     for index, question in enumerate(candidates):
         if question["stem"] not in seen:
             seen.add(question["stem"])
             continue
+        replacement = _find_duplicate_replacement(
+            question,
+            state["kp_id"],
+            seen,
+        )
+        if replacement is not None:
+            candidates[index] = replacement
+            seen.add(replacement["stem"])
+            continue
+        if get_question_handler(question.get("params")) is not None:
+            continue
         for offset in range(1, 40):
-            replacement = build_designed_question(
+            generated_replacement = build_designed_question(
                 question["difficulty"],
                 sequence=1000 + index * 200 + offset,
                 kp_id=state["kp_id"],
             )
-            if replacement["stem"] not in seen:
-                candidates[index] = replacement
-                seen.add(replacement["stem"])
+            if generated_replacement["stem"] not in seen:
+                candidates[index] = generated_replacement
+                seen.add(generated_replacement["stem"])
                 break
     return {"candidates": candidates}
+
+
+def _find_duplicate_replacement(
+    question: dict,
+    kp_id: str,
+    seen_stems: set[str],
+) -> dict | None:
+    """Find an unused question from the same handler family when possible."""
+    handler = get_question_handler(question.get("params"))
+    with SessionLocal() as s:
+        rows = (
+            s.query(QuestionRow)
+            .filter(
+                QuestionRow.kp_id == int(kp_id),
+                QuestionRow.difficulty == question["difficulty"],
+                QuestionRow.source.in_(["ai_generated", "private"]),
+            )
+            .all()
+        )
+    pool = []
+    for row in rows:
+        if row.stem in seen_stems or not is_selectable_seed(row):
+            continue
+        if handler is not None:
+            row_handler = get_question_handler(row.params)
+            if row_handler is None or row_handler.kind != handler.kind:
+                continue
+        pool.append(row)
+    if not pool:
+        return None
+    return seed_candidate(random.choice(pool), kp_id)
 
 
 def route_after_check(state: SessionState) -> str:

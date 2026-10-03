@@ -2,6 +2,8 @@
 
 from datetime import datetime
 
+from sqlalchemy import case
+
 from app.adapters.persistence import AnswerRecord, Question, SessionLocal
 from app.adapters.session_store import eligible_session_ids
 from app.domain.mastery import propose_from_rates
@@ -18,7 +20,13 @@ def session_rates(
         rows = (
             s.query(
                 AnswerRecord.session_id,
-                AnswerRecord.is_correct,
+                case(
+                    (
+                        AnswerRecord.teacher_is_correct.is_not(None),
+                        AnswerRecord.teacher_is_correct,
+                    ),
+                    else_=AnswerRecord.is_correct,
+                ).label("effective_is_correct"),
                 AnswerRecord.evidence_weight,
                 AnswerRecord.created_at,
             )

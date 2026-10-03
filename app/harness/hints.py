@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
-from app.domain.answer_template import build_template
+from app.domain.answer_template import build_template, supports_question_template
 
 
 def _clean_instruction(text: str) -> str:
     return text.rstrip("。！？；，")
 
 
+def _template_for(question: dict) -> dict | None:
+    params = question.get("params") or {}
+    if not supports_question_template(params):
+        return None
+    return build_template(params)
+
+
 def build_hint(question: dict, level: int) -> str | None:
     """按提示等级生成不泄露最终答案的引导。"""
     if level <= 0:
         return None
-    template = build_template(question["params"]) if question.get("params") else None
+    template = _template_for(question)
     design_id = (question.get("params") or {}).get("design_id", "")
 
     if level == 1:
@@ -46,7 +53,7 @@ def build_scaffold(question: dict, level: int) -> str | None:
     """生成求助后的分层脚手架；只给方法步骤，不泄露最终答案。"""
     if level <= 0:
         return None
-    template = build_template(question["params"]) if question.get("params") else None
+    template = _template_for(question)
     design_id = (question.get("params") or {}).get("design_id", "")
 
     if level == 1:

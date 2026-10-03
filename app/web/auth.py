@@ -82,6 +82,32 @@ def teacher_cookie_value(token: str) -> str:
     return hashlib.sha256(f"little-tutor:{token}".encode("utf-8")).hexdigest()
 
 
+def _resume_secret() -> str:
+    return (
+        os.getenv("TUTOR_RESUME_SECRET", "").strip()
+        or os.getenv("TUTOR_TEACHER_TOKEN", "").strip()
+    )
+
+
+def resume_token(session_id: str) -> str | None:
+    """为跨设备学生恢复链接生成签名；未配置密钥时返回 None。"""
+    secret = _resume_secret()
+    if not secret:
+        return None
+    return hmac.new(
+        secret.encode("utf-8"),
+        f"resume:{session_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def valid_resume_token(session_id: str, token: str) -> bool:
+    expected = resume_token(session_id)
+    if expected is None:
+        return True
+    return bool(token) and hmac.compare_digest(token, expected)
+
+
 def teacher_redirect(request: Request) -> RedirectResponse | None:
     """返回老师登录跳转；未配置令牌时按本地演示模式放行。"""
     expected = os.getenv("TUTOR_TEACHER_TOKEN", "").strip()

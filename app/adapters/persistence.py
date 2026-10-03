@@ -162,12 +162,22 @@ class AnswerRecord(Base):
     """做题记录表（喂给画像更新，见规格 6.1）"""
 
     __tablename__ = "answer_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "student_id",
+            "question_id",
+            "session_id",
+            "attempt_no",
+            name="uq_answer_attempt",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     student_id: Mapped[int] = mapped_column(ForeignKey("students.id"), index=True)
     question_id: Mapped[int] = mapped_column(ForeignKey("questions.id"), index=True)
     answer: Mapped[str] = mapped_column(Text)                            # 学生提交的答案
-    is_correct: Mapped[bool] = mapped_column(default=False)
+    is_correct: Mapped[bool] = mapped_column(default=False)              # 程序初评事实，永久保留
+    teacher_is_correct: Mapped[bool | None] = mapped_column(nullable=True)  # 老师确认后的有效结论
     attempt_no: Mapped[int] = mapped_column(default=1)
     first_attempt_correct: Mapped[bool] = mapped_column(default=False)
     hint_count: Mapped[int] = mapped_column(default=0)
@@ -176,6 +186,7 @@ class AnswerRecord(Base):
     evidence_weight: Mapped[float] = mapped_column(default=1.0)
     used_seconds: Mapped[int] = mapped_column(default=0)
     error_type: Mapped[str | None] = mapped_column(String(30), nullable=True)  # 8 类易错之一
+    subquestion_results: Mapped[list | None] = mapped_column(JSON, nullable=True)
     session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
@@ -226,6 +237,9 @@ class TeacherDecision(Base):
     question_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     decision: Mapped[str] = mapped_column(String(10))          # accept / reject / edit
     proposal: Mapped[dict] = mapped_column(JSON, default=dict)  # AI 当时的建议原文
+    dedupe_key: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
@@ -293,8 +307,52 @@ def init_db() -> None:
     """创建所有表（幂等：已存在则跳过）"""
     Base.metadata.create_all(engine)
     if engine.url.get_backend_name() == "sqlite":
-        _ensure_answer_evidence_columns()
-        _ensure_practice_lease_columns()
+        _ensure_schema_migrations()
+        _run_migration(
+            "20261003_answer_evidence",
+            _ensure_answer_evidence_columns,
+        )
+        _run_migration(
+            "20261003_practice_lease",
+            _ensure_practice_lease_columns,
+        )
+        _run_migration(
+            "20261003_teacher_decision_dedupe",
+            _ensure_teacher_decision_dedupe_key,
+        )
+        _run_migration(
+            "20261003_answer_attempt_unique",
+            _ensure_answer_attempt_unique_index,
+        )
+
+
+def _ensure_schema_migrations() -> None:
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "CREATE TABLE IF NOT EXISTS schema_migrations ("
+            "version VARCHAR(80) PRIMARY KEY, "
+            "applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)"
+        )
+
+
+def _migration_applied(version: str) -> bool:
+    with engine.connect() as conn:
+        row = conn.exec_driver_sql(
+            "SELECT 1 FROM schema_migrations WHERE version = ?",
+            (version,),
+        ).fetchone()
+    return row is not None
+
+
+def _run_migration(version: str, migration) -> None:
+    if _migration_applied(version):
+        return
+    migration()
+    with engine.begin() as conn:
+        conn.exec_driver_sql(
+            "INSERT INTO schema_migrations(version) VALUES (?)",
+            (version,),
+        )
 
 
 def _ensure_answer_evidence_columns() -> None:
@@ -306,6 +364,8 @@ def _ensure_answer_evidence_columns() -> None:
         ("scaffold_level", "INTEGER NOT NULL DEFAULT 0"),
         ("assistance_level", "VARCHAR(20) NOT NULL DEFAULT 'independent'"),
         ("evidence_weight", "FLOAT NOT NULL DEFAULT 1.0"),
+        ("teacher_is_correct", "BOOLEAN"),
+        ("subquestion_results", "JSON"),
     )
     with engine.begin() as conn:
         columns = {
@@ -351,6 +411,48 @@ def _ensure_practice_lease_columns() -> None:
                 conn.exec_driver_sql(
                     f"ALTER TABLE practice_sessions ADD COLUMN {name} {ddl}"
                 )
+
+
+def _ensure_teacher_decision_dedupe_key() -> None:
+    with engine.begin() as conn:
+        columns = {
+            row[1]
+            for row in conn.exec_driver_sql(
+                "PRAGMA table_info(teacher_decisions)"
+            ).fetchall()
+        }
+        if "dedupe_key" not in columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE teacher_decisions "
+                "ADD COLUMN dedupe_key VARCHAR(64)"
+            )
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_teacher_decision_dedupe "
+            "ON teacher_decisions(dedupe_key) "
+            "WHERE dedupe_key IS NOT NULL"
+        )
+
+
+def _ensure_answer_attempt_unique_index() -> None:
+    with engine.begin() as conn:
+        duplicates = conn.exec_driver_sql(
+            "SELECT student_id, question_id, session_id, attempt_no, "
+            "COUNT(*) AS n FROM answer_records "
+            "GROUP BY student_id, question_id, session_id, attempt_no "
+            "HAVING n > 1 LIMIT 1"
+        ).fetchone()
+        if duplicates is not None:
+            raise RuntimeError(
+                "answer_records 存在重复作答，无法创建唯一约束："
+                f"{tuple(duplicates)}"
+            )
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_answer_attempt "
+            "ON answer_records("
+            "student_id, question_id, COALESCE(session_id, ''), attempt_no"
+            ")"
+        )
 
 
 if __name__ == "__main__":

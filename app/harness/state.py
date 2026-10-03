@@ -19,6 +19,8 @@ def _first_error(old: Optional[str], new: Optional[str]) -> Optional[str]:
 
 
 class TutorState(TypedDict):
+    # [Legacy] 仅用于 legacy_graph.py 和 profile_graph.py。
+    # 新版多题会话主线请使用 SessionState。
     student_id: str
     session_id: Optional[str]
     kp_id: str
@@ -58,6 +60,9 @@ class SessionState(TypedDict):
     h1_validation_error: Optional[str]
     difficulty_ratios: Optional[dict[str, int]]
     adaptive_target: Optional[Literal["simple", "mid", "hard"]]
+    training_focus: Optional[dict]
+    focus_remaining: int
+    teaching_plan: Optional[dict]
     approved_pool: List[Question]
     approved_questions: List[Question]
     current_question: Optional[Question]
@@ -73,5 +78,6 @@ class SessionState(TypedDict):
     round_results: List[QuestionResult]
     session_proposals: List[dict]
     h3_decision: Literal["accept", "reject"]
+    h3_validation_error: Optional[str]
     test_session: bool
     phase: Literal["assemble", "answer", "grade_round", "summarize", "done"]
