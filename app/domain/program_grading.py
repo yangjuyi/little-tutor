@@ -47,6 +47,31 @@ def compute_program_grade(
             blank_results,
         )
         breakpoint = breakpoint_label(blank_results)
+        first_unfilled = next(
+            (
+                index
+                for index, row in enumerate(blank_results)
+                if row.get("unfilled")
+            ),
+            None,
+        )
+        first_wrong = next(
+            (
+                index
+                for index, row in enumerate(blank_results)
+                if not row.get("unfilled") and not row["is_correct"]
+            ),
+            None,
+        )
+        result["unfilled_blank_ids"] = [
+            row["blank_id"] for row in blank_results if row.get("unfilled")
+        ]
+        result["submission_incomplete"] = bool(result["unfilled_blank_ids"])
+        result["attribution_blocked_by_unfilled"] = bool(
+            not final_answer_correct
+            and first_unfilled is not None
+            and (first_wrong is None or first_unfilled <= first_wrong)
+        )
         result["process_correct"] = breakpoint is None
         if breakpoint:
             result["is_correct"] = False

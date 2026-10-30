@@ -69,6 +69,30 @@ class TestAnswerEvidenceMigration(unittest.TestCase):
             engine.dispose()
             os.unlink(tmp.name)
 
+    def test_old_practice_sessions_receive_archive_column(self):
+        tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        tmp.close()
+        engine = create_engine(f"sqlite:///{tmp.name}")
+        try:
+            with engine.begin() as conn:
+                conn.exec_driver_sql(
+                    "CREATE TABLE practice_sessions ("
+                    "session_id TEXT PRIMARY KEY)"
+                )
+            with patch.object(persistence, "engine", engine):
+                persistence._ensure_practice_archive_column()
+            with engine.connect() as conn:
+                columns = {
+                    row[1]
+                    for row in conn.exec_driver_sql(
+                        "PRAGMA table_info(practice_sessions)"
+                    ).fetchall()
+                }
+            self.assertIn("archived_at", columns)
+        finally:
+            engine.dispose()
+            os.unlink(tmp.name)
+
     def test_schema_migrations_are_recorded_and_idempotent(self):
         tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         tmp.close()
@@ -91,6 +115,7 @@ class TestAnswerEvidenceMigration(unittest.TestCase):
                     "20261003_practice_lease",
                     "20261003_teacher_decision_dedupe",
                     "20261003_answer_attempt_unique",
+                    "20261005_session_archive",
                 },
             )
         finally:

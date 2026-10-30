@@ -218,6 +218,9 @@ class PracticeSessionRecord(Base):
     )
     started_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True, index=True
+    )
 
 
 # ============================================================
@@ -324,6 +327,10 @@ def init_db() -> None:
             "20261003_answer_attempt_unique",
             _ensure_answer_attempt_unique_index,
         )
+        _run_migration(
+            "20261005_session_archive",
+            _ensure_practice_archive_column,
+        )
 
 
 def _ensure_schema_migrations() -> None:
@@ -411,6 +418,26 @@ def _ensure_practice_lease_columns() -> None:
                 conn.exec_driver_sql(
                     f"ALTER TABLE practice_sessions ADD COLUMN {name} {ddl}"
                 )
+
+
+def _ensure_practice_archive_column() -> None:
+    """兼容旧 SQLite 文件：补会话软归档时间。"""
+    with engine.begin() as conn:
+        columns = {
+            row[1]
+            for row in conn.exec_driver_sql(
+                "PRAGMA table_info(practice_sessions)"
+            ).fetchall()
+        }
+        if "archived_at" not in columns:
+            conn.exec_driver_sql(
+                "ALTER TABLE practice_sessions "
+                "ADD COLUMN archived_at DATETIME"
+            )
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_practice_sessions_archived_at "
+            "ON practice_sessions(archived_at)"
+        )
 
 
 def _ensure_teacher_decision_dedupe_key() -> None:

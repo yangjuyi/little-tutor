@@ -12,7 +12,7 @@ first_seen: 2026-10-03
 source: evidence collection web flow
 question_id: null
 student_id: null
-session_id: web-5a6f3642
+session_id: synthetic-session-a
 input: 新会话仍停在 H1 预审时触发 /summarize
 expected: 拒绝汇总并跳回当前阶段页面
 actual: /waiting-confirmation 返回 500，KeyError: 'proposals'
@@ -26,7 +26,7 @@ fix: trigger_summary 增加阶段、剩余题量和 interrupt 类型校验；
 regression_test: tests/test_web.py::TestWebFlow::
                  test_summarize_before_h1_redirects_without_server_error
 status: fixed
-owner: Codex
+maintainer: solo-project-maintainer
 ```
 
 ### Verification
@@ -44,8 +44,8 @@ badcase_id: BC-0002
 first_seen: 2026-10-03
 source: evidence collection web flow
 question_id: null
-student_id: 1
-session_id: web-5a6f3642
+student_id: local-test-student
+session_id: synthetic-session-a
 input: 老师已定稿，但学生关闭原标签页后无法重新进入该会话
 expected: 学生可按 session_id 恢复原会话并回到当前答题位置
 actual: 学生首页只能新开练习，没有恢复已有会话入口
@@ -60,12 +60,12 @@ fix: 新增 /resume?session_id=...；同步 thread_id/student_id cookie；
 regression_test: tests/test_web.py::TestWebFlow::
                  test_resume_session_restores_student_answer_page
 status: fixed
-owner: Codex
+maintainer: solo-project-maintainer
 ```
 
 ### Verification
 
-- `/resume?session_id=web-5a6f3642` returns `303 Location: /answer/0`.
+- `/resume?session_id=synthetic-session-a` returns `303 Location: /answer/0`.
 - Full suite: `289/289` passed in `153.977s`.
 
 ## BC-0003
@@ -75,8 +75,8 @@ badcase_id: BC-0003
 first_seen: 2026-10-03
 source: evidence collection answer flow
 question_id: 57
-student_id: 1
-session_id: web-5a6f3642
+student_id: local-test-student
+session_id: synthetic-session-a
 input: 学生完成第 1 题并提交
 expected: 批改结果落库后继续进入下一题
 actual: collect_round 选择下一题时抛出 500
@@ -91,14 +91,14 @@ fix: 先转 bool，再与题型比较；恢复入口自动继续中断的 collec
 regression_test: tests/test_teaching_plan.py::TestTeachingPlan::
                  test_empty_source_design_does_not_break_ranking
 status: fixed
-owner: Codex
+maintainer: solo-project-maintainer
 ```
 
 ### Verification
 
 - Focused teaching-plan tests passed.
 - Full suite: `291/291` passed in `154.969s`.
-- Live recovery: `web-5a6f3642` resumed to `/answer/1`;
+- Live recovery: `synthetic-session-a` resumed to `/answer/1`;
   first answer remained saved and was not duplicated.
 
 ## BC-0004
@@ -108,8 +108,8 @@ badcase_id: BC-0004
 first_seen: 2026-10-03
 source: evidence collection answer grading
 question_id: 57
-student_id: 1
-session_id: web-5a6f3642
+student_id: local-test-student
+session_id: synthetic-session-a
 input: 1000（1+x）^2=1440
 expected: 与 1000(1+x)^2=1440 等价，判正确
 actual: 程序判错误，error_type=计算
@@ -122,14 +122,14 @@ fix: answer_equiv 先归一化全角括号、正负号、等号和乘号，再�
 regression_test: tests/test_exam_growth_rate.py::TestGrowthRateSolver::
                  test_equation_equivalence_accepts_full_width_parentheses
 status: fixed
-owner: Codex
+maintainer: solo-project-maintainer
 ```
 
 ### Verification
 
 - Focused equation-equivalence tests passed.
 - Full suite: `292/292` passed in `143.712s`.
-- Corrected `AnswerRecord` and checkpoint fact for `web-5a6f3642/q57`
+- Corrected `AnswerRecord` and checkpoint fact for `synthetic-session-a/q57`
   to `is_correct=true`, `error_type=无错`, `evidence_weight=0.5`.
 
 ## BC-0005
@@ -139,8 +139,8 @@ badcase_id: BC-0005
 first_seen: 2026-10-03
 source: historical acceptance / log-derived comparison
 question_id: 2
-student_id: 1
-session_id: web-ac3764c5
+student_id: local-test-student
+session_id: synthetic-session-b
 input: 选择题步骤只向 LLM 传入作答序号 1/2
 expected: LLM 应按选项文本理解学生选择
 actual: LLM 把序号当成数学值并产生错误过程归因
@@ -154,7 +154,7 @@ fix: student_steps 对选择题附加 options 和 selected_option_text；
 regression_test: tests/test_agents.py::TestGradeQuestionIntegration::
                  test_choice_steps_include_option_context_for_llm
 status: fixed
-owner: Codex
+maintainer: solo-project-maintainer
 ```
 
 ### Verification
@@ -163,3 +163,6 @@ owner: Codex
 - Full suite: `293/293` passed in `150.136s`.
 - Current grader prompt fingerprint changed to `a7650164fb16`;
   complete Eval must be rerun before reusing old Eval conclusions.
+- 2026-10-05: full suite `316` tests, `0 failed`, `5 skipped` in `179.318s`;
+  grader prompt changed to `7c3c2aea3e04` with partial-submission and
+  `unfilled` rules. The current Prompt Eval was rerun; see `evals/RESULTS.md`.

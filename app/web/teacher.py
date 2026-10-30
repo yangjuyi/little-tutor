@@ -89,6 +89,8 @@ def teacher_sessions_page(request: Request):
         "teacher_sessions.html",
         {
             "sessions": sessions,
+            "archived_count": request.query_params.get("archived", ""),
+            "error_message": request.query_params.get("error", ""),
             "state_labels": {
                 "pending_review": "待预审",
                 "in_progress": "答题中",
@@ -106,7 +108,10 @@ def select_teacher_session(request: Request, session_id: str):
     redirect = teacher_redirect(request)
     if redirect:
         return redirect
-    entry = practice.teacher_session_entry(session_id)
+    try:
+        entry = practice.teacher_session_entry(session_id)
+    except ValueError:
+        return RedirectResponse("/teacher/sessions", status_code=303)
     target = {
         "review": "/teacher/review",
         "summary": "/teacher/summary",
@@ -120,6 +125,33 @@ def select_teacher_session(request: Request, session_id: str):
         samesite="lax",
     )
     return response
+
+
+@router.post("/teacher/session/{session_id}/archive")
+def archive_teacher_session(request: Request, session_id: str):
+    redirect = teacher_redirect(request)
+    if redirect:
+        return redirect
+    try:
+        practice.archive_session(session_id)
+    except ValueError as exc:
+        return RedirectResponse(
+            f"/teacher/sessions?error={quote(str(exc))}",
+            status_code=303,
+        )
+    return RedirectResponse("/teacher/sessions", status_code=303)
+
+
+@router.post("/teacher/sessions/archive-finished")
+def archive_finished_teacher_sessions(request: Request):
+    redirect = teacher_redirect(request)
+    if redirect:
+        return redirect
+    count = practice.archive_finished_sessions()
+    return RedirectResponse(
+        f"/teacher/sessions?archived={count}",
+        status_code=303,
+    )
 
 
 @router.get("/teacher/review")

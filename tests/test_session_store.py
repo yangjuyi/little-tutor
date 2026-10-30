@@ -153,6 +153,55 @@ class TestSessionStore(unittest.TestCase):
             self.assertEqual(rows[0].status, "completed")
             self.assertEqual(rows[0].review_status, "accepted")
 
+    def test_archive_hides_terminal_sessions_and_is_idempotent(self):
+        session_store.start_practice_session(
+            "S20260912-010", self.student_id, self.kp_id
+        )
+        session_store.complete_practice_session("S20260912-010")
+        session_store.review_practice_session(
+            "S20260912-010", "accepted"
+        )
+        session_store.archive_practice_session("S20260912-010")
+        session_store.archive_practice_session("S20260912-010")
+
+        with self.session() as s:
+            row = s.get(db.PracticeSessionRecord, "S20260912-010")
+            self.assertIsNotNone(row.archived_at)
+            self.assertEqual(row.status, "completed")
+            self.assertEqual(row.review_status, "accepted")
+
+    def test_archive_rejects_active_session_but_allows_stale_session(self):
+        session_store.start_practice_session(
+            "S20260912-011", self.student_id, self.kp_id
+        )
+        with self.assertRaisesRegex(ValueError, "未过期"):
+            session_store.archive_practice_session("S20260912-011")
+
+        with self.session() as s:
+            row = s.get(db.PracticeSessionRecord, "S20260912-011")
+            row.started_at = datetime.now() - timedelta(hours=25)
+            s.commit()
+
+        session_store.archive_practice_session("S20260912-011")
+        with self.session() as s:
+            row = s.get(db.PracticeSessionRecord, "S20260912-011")
+            self.assertIsNotNone(row.archived_at)
+
+    def test_archive_finished_sessions_bulk_count(self):
+        for session_id in ("S20260912-012", "S20260912-013"):
+            session_store.start_practice_session(
+                session_id, self.student_id, self.kp_id
+            )
+            session_store.complete_practice_session(session_id)
+        self.assertEqual(
+            session_store.archive_finished_practice_sessions(),
+            2,
+        )
+        self.assertEqual(
+            session_store.archive_finished_practice_sessions(),
+            0,
+        )
+
     def test_session_lease_blocks_other_worker_and_expires(self):
         session_store.start_practice_session(
             "S20260912-003", self.student_id, self.kp_id

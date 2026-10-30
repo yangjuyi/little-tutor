@@ -3,6 +3,9 @@
 本目录用于对 little-tutor 的程序判分和 LLM 归因做离线评测。评测用例从公开
 种子题生成，私有题只在本机通过 `--include-private` 临时使用，不提交到仓库。
 
+本文件只定义“怎么运行 Eval 和指标含义”，不维护当前能力状态。当前 Eval 结果
+见 `RESULTS.md`；当前对外能力边界见 `../CAPABILITY_STATUS.md`。
+
 ## 生成公开评测集
 
 ```powershell
@@ -89,11 +92,10 @@
 .\.venv\Scripts\python.exe -X utf8 evals\run_eval.py --mode real --tag no_steps
 ```
 
-## 当前基线
+## 当前结果
 
-- 全量自动化测试：`308` 项。
-- 最近完整真实 LLM Eval：公开 `45` 条 + 本地私有 `180` 条；程序判分和
-  归因非空率均为 `100%`，对应当前 Prompt 指纹 `a7650164fb16`。
+本文件不重复维护当前测试数、Prompt 指纹和 Eval 指标。结果见 `RESULTS.md`，
+对外边界见 `../CAPABILITY_STATUS.md`。
 - 正确题和无步骤题会按设计跳过 LLM，直接使用程序证据；这类正常路径计入
   `program_evidence_rate`，不再沿用旧指标名 `fallback_rate`。
 - 私有中考题：`49` 道；离线结构化求解 `20` 道。

@@ -20,6 +20,7 @@ from app.adapters.persistence import (
 ReviewDecision = Literal["accepted", "rejected"]
 LEASE_OWNER = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 DEFAULT_LEASE_TTL_SECONDS = 300
+DEFAULT_SESSION_STALE_HOURS = 24
 
 
 def lease_ttl_seconds() -> int:
@@ -34,6 +35,26 @@ def lease_ttl_seconds() -> int:
     if value <= 0:
         raise ValueError("TUTOR_LEASE_TTL_SECONDS 必须大于 0")
     return value
+
+
+def session_stale_hours() -> int:
+    """已开始但长期无有效租约的会话，可在老师工作台归档。"""
+    raw = os.getenv("TUTOR_SESSION_STALE_HOURS", "").strip()
+    if not raw:
+        return DEFAULT_SESSION_STALE_HOURS
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError("TUTOR_SESSION_STALE_HOURS 必须是正整数") from exc
+    if value <= 0:
+        raise ValueError("TUTOR_SESSION_STALE_HOURS 必须大于 0")
+    return value
+
+
+def session_is_stale(started_at: datetime, now: datetime | None = None) -> bool:
+    """只把超过阈值且没有活动租约的 started 会话视为过期。"""
+    now = now or datetime.now()
+    return started_at <= now - timedelta(hours=session_stale_hours())
 
 
 def acquire_practice_lease(
@@ -172,6 +193,49 @@ def abort_practice_session(session_id: str) -> None:
         row.status = "aborted"
         row.review_status = "pending"
         s.commit()
+
+
+def archive_practice_session(session_id: str) -> None:
+    """软归档会话：从学生/老师列表隐藏，保留作答与审计记录。"""
+    with SessionLocal() as s:
+        row = s.get(PracticeSessionRecord, session_id)
+        if row is None:
+            raise ValueError(f"会话不存在：{session_id}")
+        if row.archived_at is not None:
+            return
+        if row.status == "started":
+            now = datetime.now()
+            if not session_is_stale(row.started_at, now):
+                raise ValueError("进行中的会话未过期，不能归档")
+            if (
+                row.lease_expires_at is not None
+                and row.lease_expires_at >= now
+            ):
+                raise ValueError("会话仍在处理中，不能归档")
+        row.archived_at = datetime.now()
+        row.lease_owner = None
+        row.lease_expires_at = None
+        s.commit()
+
+
+def archive_finished_practice_sessions() -> int:
+    """归档全部已完成或已中断会话，返回本次归档数量。"""
+    with SessionLocal() as s:
+        rows = (
+            s.query(PracticeSessionRecord)
+            .filter(
+                PracticeSessionRecord.archived_at.is_(None),
+                PracticeSessionRecord.status.in_(("completed", "aborted")),
+            )
+            .all()
+        )
+        now = datetime.now()
+        for row in rows:
+            row.archived_at = now
+            row.lease_owner = None
+            row.lease_expires_at = None
+        s.commit()
+    return len(rows)
 
 
 def review_practice_session(

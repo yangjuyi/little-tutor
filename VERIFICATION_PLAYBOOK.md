@@ -3,6 +3,9 @@
 本文件定义工程回归和真实用户体验测试的执行方法。所有可能写入业务数据的验证
 必须先设置隔离数据库路径，禁止直接使用正式库。
 
+本文件只定义“怎么验证”，不维护当前测试数、Eval 结果或能力状态。当前结果以
+`CAPABILITY_STATUS.md` 和 `evals/RESULTS.md` 为准。
+
 完整手工验收矩阵见 `V2_FULL_ACCEPTANCE_CASES.md`。
 
 ## 1. 自动化基线
@@ -13,9 +16,10 @@
 .\.venv\Scripts\python.exe -m unittest discover -s tests -q
 ```
 
-当前基线：`308` 项通过；测试会自动注入占位 API Key，不需要本地 `.env`。
-依赖忽略目录 `data/private_questions/` 的 4 个测试在缺少私有题料时会显式
-`skip`，不会以凭证或缺失数据错误失败。
+测试会自动注入占位 API Key，不需要本地 `.env`。当前测试总数和 skip 数不在
+本文件维护；当前基线见 `CAPABILITY_STATUS.md`。
+依赖忽略目录 `data/private_questions/` 的 4 个测试，以及 1 个既有条件测试，
+在缺少对应数据时会显式 `skip`，不会以凭证或缺失数据错误失败。
 
 真实浏览器 UI 验收：
 

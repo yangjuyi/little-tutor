@@ -47,7 +47,7 @@ class QuestionParams(BaseModel):
 
 class AttributionOutput(BaseModel):
     error_type: Literal[
-        "审题", "概念", "计算", "跳步", "粗心", "无错", "未归因"
+        "审题", "概念", "计算", "跳步", "粗心", "漏根", "无错", "未归因"
     ] = Field(
         description="错误类型；模型正常归因时从审题/概念/计算/跳步/粗心/无错中选择"
     )
@@ -213,6 +213,8 @@ def should_skip_attribution(
     """Skip LLM attribution when program facts already leave no error to explain."""
     if skip or not student_steps:
         return True
+    if program_result.get("attribution_blocked_by_unfilled"):
+        return True
     return bool(
         program_result.get("final_answer_correct")
         and program_result.get("process_correct")
@@ -241,7 +243,12 @@ def build_program_attribution(
     final_answer_correct = bool(program_result.get("final_answer_correct"))
     process_correct = bool(program_result.get("process_correct"))
     program_breakpoint = program_result.get("program_breakpoint")
-    if final_answer_correct and process_correct:
+    if program_result.get("attribution_blocked_by_unfilled"):
+        error_type = "未归因"
+        confidence = 0.0
+        evidence = "学生部分作答，前面步骤未填写，无法可靠归因"
+        insufficient_evidence = True
+    elif final_answer_correct and process_correct:
         error_type = "无错"
         confidence = 1.0
         evidence = "程序判定最终答案与过程均正确"
@@ -281,7 +288,16 @@ def _normalize_attribution(
     process_correct = bool(program_result.get("process_correct"))
     program_breakpoint = program_result.get("program_breakpoint")
 
-    if not student_steps and not final_answer_correct:
+    if program_result.get("attribution_blocked_by_unfilled"):
+        error.update({
+            "error_type": "未归因",
+            "confidence": 0.0,
+            "evidence": "学生部分作答，前面步骤未填写，无法可靠归因",
+            "evidence_source": "program",
+            "ai_certain": False,
+            "insufficient_evidence": True,
+        })
+    elif not student_steps and not final_answer_correct:
         error.update({
             "error_type": "未归因",
             "confidence": 0.0,

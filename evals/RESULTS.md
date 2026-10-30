@@ -1,14 +1,17 @@
 # Evaluation Baseline
 
-当前基线日期：`2026-09-26`
+当前基线日期：`2026-10-05`
 
-> 本轮完整重跑的 Grader Prompt 指纹为 `f063bb68159d`。2026-09-25 批改链路
-> 拆为程序事实、归因建议、合并和落库节点后，旧 Prompt 指标不再作为当前结论。
+本文件只维护详细 Eval 结果、指标和指标边界，不维护项目全量能力状态。
+对外能力摘要见 `../CAPABILITY_STATUS.md`。
 
-当前完整 Eval 对应 Prompt 指纹：`a7650164fb16`
+当前 Grader Prompt 指纹：`7c3c2aea3e04`。该 Prompt 已增加部分作答、
+`unfilled` 与固定模板错因限制规则。
 
-2026-10-03 已用当前 Prompt 重跑公开 `45` + 私有 `180`：
+2026-10-05 已用当前 Prompt 完整重跑公开 `45` + 私有 `180`：
 程序判分与归因非空率均为 `100%`，无程序判分失败。
+
+历史 Prompt `a7650164fb16` 的旧结果仅作为版本对照，不再作为当前结论。
 
 ## Public Seed Set
 
@@ -24,16 +27,17 @@
 - 证据不足标记率：`100%`
 - 无步骤过度归因率：`0%`
 - 程序判分失败：`0`
-- 报告：`outputs/evals/public-real-current-prompt-20260926.json`
 
 错因分布：
 
 ```text
 无错 18
-未归因 9
+未归因 12
+漏根 6
 计算 9
-跳步 9
 ```
+
+报告：`outputs/evals/public-real-prompt-7c3c-20261005.json`
 
 ## Private Drill Sample
 
@@ -49,15 +53,15 @@
 - 证据不足标记率：`100%`
 - 无步骤过度归因率：`0%`
 - 程序判分失败：`0`
-- 报告：`outputs/evals/private-real-current-prompt-20260926.json`
+- 报告：`outputs/evals/private-real-prompt-7c3c-20261005.json`
 
 错因分布：
 
 ```text
 无错 73
 未归因 36
+漏根 35
 计算 36
-跳步 35
 ```
 
 程序证据来源率不是故障兜底率。正确题和无步骤题会按设计跳过 LLM，

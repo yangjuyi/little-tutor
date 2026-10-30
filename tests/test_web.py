@@ -935,6 +935,32 @@ class TestWebFlow(unittest.TestCase):
         self.assertIn("已中断", page.text)
         self.assertRegex(page.text, r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
 
+    def test_teacher_can_archive_finished_session(self):
+        resp = self.client.post(
+            "/start",
+            data={"count": "2"},
+            follow_redirects=False,
+        )
+        session_id = resp.cookies["thread_id"]
+        with self.session() as s:
+            row = s.get(db.PracticeSessionRecord, session_id)
+            row.status = "completed"
+            row.review_status = "accepted"
+            s.commit()
+
+        dashboard = self.client.get("/teacher/sessions")
+        self.assertIn(session_id, dashboard.text)
+        archived = self.client.post(
+            f"/teacher/session/{session_id}/archive",
+            follow_redirects=False,
+        )
+        self.assertEqual(
+            archived.headers["location"],
+            "/teacher/sessions",
+        )
+        dashboard = self.client.get("/teacher/sessions")
+        self.assertNotIn(session_id, dashboard.text)
+
     def test_error_page_retries_without_manual_thread_id(self):
         self.client.cookies.set("thread_id", "t-error-page")
         with patch.object(

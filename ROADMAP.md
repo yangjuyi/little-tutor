@@ -1,6 +1,6 @@
 # little-tutor 路线图
 
-更新时间：2026-09-19
+更新时间：2026-10-06
 
 本文件是执行优先级的唯一来源。当前能力与对外口径以
 `CAPABILITY_STATUS.md` 为准；`PROJECT_SPEC.md` 保留产品细节，
@@ -15,23 +15,10 @@
 
 ## 当前状态
 
-- 阶段：V2 验收通过后的 `V2.5-lite 综合题评估基础`。增长率 / 降价率 15 道
-  真实题主链路已验收；题型 handler、通用作答元素、老师推翻程序判分已落地。
-- 自动化：308 项测试通过（2026-10-03 本地复跑）。
-- 真实闭环：accept / reject / accept wrong / reject wrong 通过。
-- 过程诊断：领域契约和一元一次/二次方程转换器已落地，尚未接入主链路。
-- 真实题：49 道私有探针，20 道离线求解通过，15 道增长率题完成主链路验收；
-  判别式第二个 handler 已注册，当前真实题样本 1 道已走 handler 验收路径；
-  利润/销售与面积/几何各有 15 道样本，但尚未完成 solver 和主链路验收。
-- 默认直接求解仍为模板填空；真实增长率题按原题型作答。
-- 综合题机制：`QuestionHandler`、`ResponseElement`、Subquestion 结果聚合、
-  `AnswerRecord.subquestion_results`、H3 逐子问题确认和两道真实 `(1)(2)` 题目
-  已落地。
-
-## V2 收口
-
-V2 已于 2026-09-16 完成功能、浏览器自动化、真实 LLM 和真机人工验收。
-过程诊断不属于 V2 完成门槛，提交后进入 V2.5。
+本文件不维护当前能力、测试数字、Eval 结果或验收结论。当前状态以
+[CAPABILITY_STATUS.md](CAPABILITY_STATUS.md) 为准，Eval 结果以
+[evals/RESULTS.md](evals/RESULTS.md) 为准，V2 历史验收见
+[V2_ACCEPTANCE.md](V2_ACCEPTANCE.md)。
 
 ## V2.5-lite 综合题评估基础（当前优先级）
 
@@ -62,6 +49,10 @@ V2 已于 2026-09-16 完成功能、浏览器自动化、真实 LLM 和真机人
    或高精度数值回代，LLM 仍不参与对错判定。
 8. 拍照/手写输入继续留 V3.3，通过可插拔输入适配器接入，不替换当前模板填空
    主链路。
+
+> V2.5 多 Agent 教学子图和 V3.1 RAG 的启动条件以
+> [ADR-005](docs/adr/0005-defer-rag-and-multi-agent-teaching-graph.md) 为准；
+> 列入路线不等于当前承诺实施。
 
 ## V3.0 体验层
 

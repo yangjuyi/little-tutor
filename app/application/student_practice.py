@@ -279,6 +279,11 @@ def resume_student_session(session_id: str) -> dict:
                 "student_id": None,
             }
         student_id = str(session.student_id)
+        if session.archived_at is not None:
+            return {
+                "kind": "error",
+                "message": "这场练习已归档，不再继续作答。",
+            }
         if session.status == "aborted":
             session.status = "started"
             session.review_status = "pending"
@@ -344,7 +349,10 @@ def list_student_sessions(
     with db.SessionLocal() as s:
         rows = (
             s.query(db.PracticeSessionRecord)
-            .filter(db.PracticeSessionRecord.student_id == int(student_id))
+            .filter(
+                db.PracticeSessionRecord.student_id == int(student_id),
+                db.PracticeSessionRecord.archived_at.is_(None),
+            )
             .order_by(db.PracticeSessionRecord.started_at.desc())
             .limit(limit)
             .all()
@@ -425,6 +433,7 @@ def list_teacher_sessions(limit: int = 50) -> list[dict]:
     with db.SessionLocal() as s:
         rows = (
             s.query(db.PracticeSessionRecord)
+            .filter(db.PracticeSessionRecord.archived_at.is_(None))
             .order_by(db.PracticeSessionRecord.started_at.desc())
             .limit(limit)
             .all()
@@ -440,6 +449,11 @@ def list_teacher_sessions(limit: int = 50) -> list[dict]:
         state, values = _teacher_session_state(row.session_id)
         if row.status == "aborted":
             state = "aborted"
+        stale = (
+            row.status == "started"
+            and session_store.session_is_stale(row.started_at)
+        )
+        can_archive = state in ("done", "aborted") or stale
         rounds = list(values.get("round_results") or [])
         total = int(values.get("question_count") or 0)
         sessions.append({
@@ -453,12 +467,29 @@ def list_teacher_sessions(limit: int = 50) -> list[dict]:
             "answered": len(rounds),
             "total": total,
             "started_at": row.started_at.strftime("%Y-%m-%d %H:%M"),
+            "stale": stale,
+            "can_archive": can_archive,
         })
     return sessions
 
 
+def archive_session(session_id: str) -> None:
+    """归档单场会话；具体状态校验由持久化层负责。"""
+    session_store.archive_practice_session(session_id)
+
+
+def archive_finished_sessions() -> int:
+    """归档所有已完成和已中断会话。"""
+    return session_store.archive_finished_practice_sessions()
+
+
 def teacher_session_entry(session_id: str) -> str:
     """老师选中会话后的目标页面类型。"""
+    db.init_db()
+    with db.SessionLocal() as s:
+        row = s.get(db.PracticeSessionRecord, session_id)
+        if row is None or row.archived_at is not None:
+            raise ValueError("会话不存在或已归档")
     state, _ = _teacher_session_state(session_id)
     return {
         "pending_review": "review",
@@ -626,7 +657,10 @@ def _build_student_steps(question: dict, form_data: Mapping) -> tuple[dict | Non
             step = {
                 "basis": blank["basis"],
                 "result": result,
+                "response_mode": "templated",
             }
+            if not result:
+                step["unfilled"] = True
             if blank["kind"] == "choice":
                 options = list(blank.get("options") or [])
                 step["options"] = options
@@ -648,26 +682,43 @@ def _build_student_steps(question: dict, form_data: Mapping) -> tuple[dict | Non
         if builder == "growth_rate":
             final_answer = by_id[answer_ids[0]]
         elif builder == "choice_text":
-            selected = int(by_id[answer_ids[0]]) - 1
-            final_answer = template["blanks"][0]["options"][selected]
+            raw_selected = by_id[answer_ids[0]]
+            try:
+                selected = int(raw_selected) - 1
+                final_answer = template["blanks"][0]["options"][selected]
+            except (TypeError, ValueError, IndexError):
+                final_answer = ""
         elif builder == "subquestions":
             final_answer = ";".join(
                 f"{subquestion['id']}={by_id[subquestion['final_blank_id']]}"
                 for subquestion in template["subquestions"]
+                if by_id.get(subquestion["final_blank_id"])
             )
         elif builder == "growth_equation":
             final_answer = str(template["computed_final_answer"])
         else:
-            roots = [by_id[blank_id] for blank_id in answer_ids]
+            roots = [
+                by_id[blank_id]
+                for blank_id in answer_ids
+                if by_id.get(blank_id)
+            ]
             final_answer = (
                 f"x={roots[0]}" if len(roots) == 1
                 else f"x1={roots[0]}, x2={roots[1]}"
+                if len(roots) >= 2
+                else ""
             )
-        steps.append({"basis": "最终作答", "result": final_answer})
+        steps.append({
+            "basis": "最终作答",
+            "result": final_answer,
+            "response_mode": "templated",
+            "unfilled": not bool(final_answer),
+        })
     else:
         steps.append({
             "basis": "最终作答",
             "result": str(form_data.get("final_answer") or "").strip(),
+            "response_mode": "free_form",
         })
     return template, steps
 

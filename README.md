@@ -1,7 +1,12 @@
 # 助教小老师 · little-tutor
 
-面向初中数学的自适应教学系统：根据学生画像自动**出题、批改、归因**，
+最终定位：面向学生和家教老师的 HITL 自适应教学工作流。
+
+当前实现：面向初中数学有限题型，根据学生画像完成**出题、批改、归因**，
 画像更新经**老师确认（human-in-the-loop）**后才落库生效。
+
+> Solo project | LangGraph HITL 一元二次方程教学工作流
+> 当前只覆盖有限题型，无生产部署、真实用户规模和长期教学效果结论。
 
 > 详细设计文档见 [PROJECT_SPEC.md](PROJECT_SPEC.md)（含 V1-V3 演进路线与架构分层），
 > 对外能力口径与当前证据见 [CAPABILITY_STATUS.md](CAPABILITY_STATUS.md)，
@@ -12,7 +17,113 @@
 > 产品参考见 [PRODUCT_RESEARCH.md](PRODUCT_RESEARCH.md)，
 > 版本变更见 [CHANGELOG.md](CHANGELOG.md)
 
-## 当前状态：V2 验收通过 + V2.5-lite 综合题评估基础
+## 30 秒看懂
+
+这个项目不是自动家教，而是回答一个更窄的问题：
+
+> 如何让老师基于可确认的作答证据，更新学生画像，并影响下一轮训练？
+
+项目起点来自一个真实辅导观察：一个原本比较沉默、只会被动接受的学生，
+开始愿意主动说“我这里不懂”。所以项目优先解决的问题不是生成更多题目，
+而是把作答、错因和证据整理清楚，让老师更容易看见学生。
+
+当前闭环：
+
+```text
+程序判分
+→ LLM 归因建议
+→ 老师确认
+→ 画像更新
+→ 难度配比和粗粒度错因驱动下一题排序
+```
+
+核心设计原则：
+
+- 程序负责事实：答案、有效根、过程断点和逐空判定。
+- LLM 只负责归因建议和文本证据，`AttributionOutput` 不包含 `is_correct`。
+- 老师负责最终生效：确认、修正、推翻和画像写回。
+- LLM 或工具失败时保留程序事实，归因降级为 `evidence_source=program`。
+- 高风险副作用放在人工确认之后，恢复时通过幂等和会话租约降低重复写入风险。
+
+### 当前证据
+
+> 当前对外能力与边界以 [CAPABILITY_STATUS.md](CAPABILITY_STATUS.md) 为准；
+> 详细 Eval 结果以 [evals/RESULTS.md](evals/RESULTS.md) 为准。下面是展示摘要。
+
+- 自动化回归：`316` 项、`0 failed`、`5 skipped`，主工作区完整复跑 `179.318s`。
+- 当前 Grader Prompt：`7c3c2aea3e04`。
+- 当前 Prompt 公开 Eval：`45` 条，程序判分和归因非空率均 `100%`。
+- 当前 Prompt 私有 Eval：`180` 条，程序判分和归因非空率均 `100%`。
+- 无步骤过度归因率：`0%`；程序判分失败：`0`。
+- 当前未提交 tracked diff 已在无 `.env`、无私有题料的临时 worktree
+  复验：`316` 项测试 `0 failed`、`5 skipped`。
+
+Eval 入口与结果：
+
+- [evals/README.md](evals/README.md)
+- [evals/RESULTS.md](evals/RESULTS.md)
+
+### 当前边界
+
+- 只覆盖一元二次方程相关的有限题型。
+- 有难度配比和粗粒度错因驱动选题，不是完整教学计划自适应。
+- 有 HITL 审计和 badcase，但没有真实老师可用性和长期教学效果结论。
+- RAG、OCR、多 Agent 教学子图、物理、化学和生产部署尚未实现。
+- 当前是 solo 验证项目，不把样本结果外推成教学有效性。
+
+### 非目标
+
+- 不替代老师，不做完全自主教学。
+- 不承诺已经提分或证明长期教学效果。
+- 不声称全学科、全题型或完整知识图谱。
+- 不把 LLM 归因当作最终对错。
+- 不伪造真实用户、老师评价、生产流量或多人协作痕迹。
+
+### 关键设计取舍
+
+- [ADR-001：为什么使用 LangGraph HITL 工作流](docs/adr/0001-use-langgraph-hitl-workflow.md)
+- [ADR-002：为什么程序判分与 LLM 归因分离](docs/adr/0002-program-grading-vs-llm-attribution.md)
+- [ADR-003：为什么需要 checkpoint、租约、幂等和恢复](docs/adr/0003-checkpoint-lease-idempotency-recovery.md)
+- [ADR-004：为什么公开与私有 Eval 分离](docs/adr/0004-public-private-eval-separation.md)
+- [ADR-005：为什么暂缓 RAG 和多 Agent 教学子图](docs/adr/0005-defer-rag-and-multi-agent-teaching-graph.md)
+
+ADR 索引见 [docs/adr/README.md](docs/adr/README.md)。
+
+更完整的设计与验证入口：
+
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+- [CAPABILITY_STATUS.md](CAPABILITY_STATUS.md)
+- [V2_ACCEPTANCE.md](V2_ACCEPTANCE.md)
+- [VERIFICATION_PLAYBOOK.md](VERIFICATION_PLAYBOOK.md)
+- [evals/BADCASE_LEDGER.md](evals/BADCASE_LEDGER.md)
+
+### 复现与验证
+
+```powershell
+# 全量离线回归
+python -m unittest discover -s tests -v
+
+# 离线 Eval 框架
+python evals\run_eval.py --mode program
+```
+
+真实 LLM Eval 需要本地 `.env`；私有 `180` 条只在本机运行，不进入公开
+仓库。公开 Eval、私有 Eval 的当前结果和边界见：
+
+- [evals/RESULTS.md](evals/RESULTS.md)
+- [evals/README.md](evals/README.md)
+
+失败和质量证据不隐藏：
+
+- [evals/BADCASE_LEDGER.md](evals/BADCASE_LEDGER.md)：`BC-0001` 到
+  `BC-0005` 的现象、复现、根因、修复和回归状态。
+- [CHANGELOG.md](CHANGELOG.md)：行为变化、修复和验证演进。
+
+## 详细实现参考（非当前状态源）
+
+以下内容用于说明工程实现方式；当前能力、边界和数字以
+[CAPABILITY_STATUS.md](CAPABILITY_STATUS.md) 和
+[evals/RESULTS.md](evals/RESULTS.md) 为准。
 
 LangGraph 核心闭环已端到端跑通：
 
@@ -77,6 +188,11 @@ LangGraph 核心闭环已端到端跑通：
   缺题槽位再使用程序化题目设计器
 - **老师错因修正与测试会话**：H3 可修正题级错因并保留 AI 原归因记录；
   测试会话只保留事实和老师决定，不进入学生画像
+- **会话归档**：老师可归档单场已完成/已中断会话，或批量归档；超过
+  `TUTOR_SESSION_STALE_HOURS` 未操作的会话也可归档。归档只从列表隐藏，
+  不删除作答、老师决定和画像证据
+- **部分作答**：模板填空不再强制每个空都填写；留空步骤标记为 `unfilled`，
+  程序不把“未填写”误判成计算、跳步或粗心
 - **业务写入逻辑幂等**：作答记录按
   `(session_id, question_id, attempt_no)` 去重；老师决定与 accept 后画像更新
   在同一业务库事务内执行，重复提交相同决定不会重复累加 mastery
@@ -104,7 +220,7 @@ copy .env.example .env          # 编辑 .env 填入 API Key
 # 4. 初始化数据库
 python -m app.adapters.persistence
 
-# 5. 跑单元测试（308 项，全程离线，不需要真实 API Key）
+# 5. 跑单元测试（316 项，全程离线，不需要真实 API Key）
 python -m unittest discover -s tests -v
 
 # 6. 启动会话制命令行（组卷预审→连续作答×N→批量画像确认，一次会话打断 ≤2 次）
@@ -145,7 +261,7 @@ little-tutor/
 │   └── generated/           # 生成的知识卡片 JSON
 ├── evals/                    # 公开 45 条 + 本地私有题离线评测（当前私有 180 条）
 ├── scripts/                 # 手动冒烟脚本（调真实 LLM，不进自动化测试）
-└── tests/                   # 308 项单元测试（含节点隔离、HITL 分流和落库行为测试）
+└── tests/                   # 316 项单元测试（含节点隔离、HITL 分流和落库行为测试）
 ```
 
 ## 开发路线

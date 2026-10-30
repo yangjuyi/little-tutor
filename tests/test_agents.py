@@ -10,9 +10,11 @@ from collections import Counter
 
 from app.adapters.llm import (
     AttributionOutput,
+    build_program_attribution,
     generate_question,
     get_llm,
     grade_question,
+    should_skip_attribution,
 )
 from app.domain.grading import (
     check_is_correct,
@@ -415,6 +417,25 @@ class TestGradeFallback(unittest.TestCase):
         self.assertEqual(result["error"]["error_type"], "未归因")
         self.assertEqual(result["error"]["evidence_source"], "program")
         self.assertTrue(result["error"]["insufficient_evidence"])
+
+    def test_unfilled_prefix_blocks_llm_attribution(self):
+        program_result = {
+            "final_answer_correct": False,
+            "process_correct": False,
+            "attribution_blocked_by_unfilled": True,
+            "steps": [{"unfilled": True}],
+        }
+        self.assertTrue(
+            should_skip_attribution(program_result, program_result["steps"])
+        )
+        attribution = build_program_attribution(
+            dict(self.QUESTION),
+            program_result,
+            "fallback",
+        )
+        self.assertEqual(attribution["error_type"], "未归因")
+        self.assertEqual(attribution["confidence"], 0.0)
+        self.assertTrue(attribution["insufficient_evidence"])
 
 
 class TestValidateDifficultyParams(unittest.TestCase):

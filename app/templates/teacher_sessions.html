@@ -12,12 +12,27 @@ body{font-family:sans-serif;max-width:980px;margin:0 auto;padding:24px 18px;back
 .actions{margin-top:10px}
 a.btn{display:inline-block;text-decoration:none;background:#1a5fb4;color:#fff;border-radius:5px;padding:8px 12px}
 a.btn.secondary{background:#fff;color:#1a5fb4;border:1px solid #1a5fb4}
+button.btn{border:0;cursor:pointer;font:inherit}
+button.archive{background:#fff;color:#b3261e;border:1px solid #b3261e}
 .empty{color:#66707a}
 </style>
 </head>
 <body>
 <h1>老师工作台</h1>
 <p class="meta">这里显示本机保存的最近练习会话，可跨设备选择要处理的会话。</p>
+{% if archived_count %}
+<p class="meta">已归档 {{ archived_count }} 场会话。</p>
+{% endif %}
+{% if error_message %}
+<p class="meta">{{ error_message }}</p>
+{% endif %}
+{% if sessions %}
+<div class="actions">
+  <form method="post" action="/teacher/sessions/archive-finished">
+    <button class="btn archive" type="submit">归档全部已完成/已中断</button>
+  </form>
+</div>
+{% endif %}
 {% if sessions %}
 {% for item in sessions %}
 <div class="card">
@@ -26,10 +41,16 @@ a.btn.secondary{background:#fff;color:#1a5fb4;border:1px solid #1a5fb4}
   <div class="meta">
     {{ item.session_id }} · {{ item.answered }}/{{ item.total }} 题 · {{ item.started_at }}
     {% if item.data_source != "real" %} · 测试数据{% endif %}
+    {% if item.stale %} · 已超过 24 小时未操作{% endif %}
   </div>
   <div class="actions">
     <a class="btn" href="/teacher/session/{{ item.session_id }}">打开会话</a>
     <a class="btn secondary" href="/resume?session_id={{ item.session_id }}{% if item.resume_token %}&token={{ item.resume_token }}{% endif %}">学生端继续</a>
+    {% if item.can_archive %}
+    <form method="post" action="/teacher/session/{{ item.session_id }}/archive" style="display:inline">
+      <button class="btn archive" type="submit">归档</button>
+    </form>
+    {% endif %}
   </div>
 </div>
 {% endfor %}

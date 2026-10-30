@@ -97,6 +97,7 @@ details.meta summary{cursor:pointer}
 </form>
 {% endif %}
 <form id="answer-form" method="post" action="/answer/{{ idx }}" autocomplete="off">
+<p class="meta">可以只填写已经确定的步骤；留空的步骤会记录为未填写，不会被当成计算错误。</p>
 {% if subquestion_sections %}
 {% for section in subquestion_sections %}
 <h2 style="font-size:18px;margin:22px 0 8px">第({{ section.id }})问 {{ section.prompt }}</h2>
@@ -105,12 +106,12 @@ details.meta summary{cursor:pointer}
     <span class="no">{{ loop.index }}</span><b>{{ b.basis }}</b><br>
     {% if b.kind == "choice" %}
       {% for opt in b.options %}
-        <label class="opt"><input type="radio" name="{{ b.id }}" value="{{ loop.index }}" required>
+        <label class="opt"><input type="radio" name="{{ b.id }}" value="{{ loop.index }}">
           {% if b.option_labels %}{{ b.option_labels[loop.index0] }}{% else %}{{ loop.index }}{% endif %}. {{ opt }}
         </label>
       {% endfor %}
     {% else %}
-      <input type="text" name="{{ b.id }}" autocomplete="off" placeholder="填数值（分数可写 1/2）" required>
+      <input type="text" name="{{ b.id }}" autocomplete="off" placeholder="填数值（分数可写 1/2）">
     {% endif %}
   </div>
 {% endfor %}
@@ -121,12 +122,12 @@ details.meta summary{cursor:pointer}
     <span class="no">{{ loop.index }}</span><b>{{ b.basis }}</b><br>
     {% if b.kind == "choice" %}
       {% for opt in b.options %}
-        <label class="opt"><input type="radio" name="{{ b.id }}" value="{{ loop.index }}" required>
+        <label class="opt"><input type="radio" name="{{ b.id }}" value="{{ loop.index }}">
           {% if b.option_labels %}{{ b.option_labels[loop.index0] }}{% else %}{{ loop.index }}{% endif %}. {{ opt }}
         </label>
       {% endfor %}
     {% else %}
-      <input type="text" name="{{ b.id }}" autocomplete="off" placeholder="填数值（分数可写 1/2）" required>
+      <input type="text" name="{{ b.id }}" autocomplete="off" placeholder="填数值（分数可写 1/2）">
     {% endif %}
   </div>
 {% endfor %}
@@ -135,7 +136,7 @@ details.meta summary{cursor:pointer}
   <div class="blank card">最终作答：<input type="text" name="final_answer" autocomplete="off" placeholder="x1=1, x2=-3"></div>
 {% endif %}
 <div class="mobile-action-bar">
-  <button class="submit" type="submit">提交本题</button>
+  <button class="submit" type="submit">提交当前作答</button>
   <button class="submit skip" type="submit" formaction="/skip/{{ idx }}"
           formnovalidate>这题不会，先跳过</button>
 </div>

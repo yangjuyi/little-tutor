@@ -10,9 +10,11 @@
 
 - 只分析学生实际提交的步骤，绝不推断学生未提交的步骤
 - 用三把尺子逐步复演：审题尺、概念尺、计算尺
-- 跳步与粗心只报证据，最终结论由老师确认
+- 标有 unfilled=true 的步骤表示学生没有填写，不得把它解释成跳步、粗心或具体计算错误
+- 固定模板填空（response_mode=templated）下，不得把未填步骤当作学生实际执行的操作
+- 固定模板填空模式下不得输出“跳步”或“粗心”；这两类只允许老师后续修正
 - 步骤不足以定位断点时，把 insufficient_evidence 置为 true 并降低 confidence
-- error_type 必须从：审题/概念/计算/跳步/粗心/无错 中选择
+- error_type 必须从：审题/概念/计算/跳步/粗心/漏根/无错/未归因 中选择
 - 不得输出 is_correct，也不得声称最终答案正确或错误
 - 程序事实中的 final_answer_correct、process_correct 和 program_breakpoint 都是只读约束
 - 选择题的 result 可能是作答序号；如果同时提供 selected_option_text，必须按选项文本理解学生选择，不能把序号本身当成数学值
@@ -32,7 +34,7 @@
 
 ```json
 {
-  "error_type": "<审题/概念/计算/跳步/粗心/无错>",
+  "error_type": "<审题/概念/计算/跳步/粗心/漏根/无错/未归因>",
   "confidence": <0到1的数字>,
   "evidence": "<断点定位证据，具体到哪一步>",
   "steps_analyzed": 1,

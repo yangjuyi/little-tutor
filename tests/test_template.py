@@ -10,6 +10,8 @@ from app.domain.answer_template import (
     judge_blanks,
     first_wrong_blank,
 )
+from app.application.student_practice import _build_student_steps
+from app.domain.program_grading import compute_program_grade
 from app.harness.legacy_graph import build_tutor_graph
 _FAKE_MASTERY = {
     "suggest_level": "weak", "confidence": 0.0, "evidence": "test", "sessions": 0,
@@ -160,6 +162,37 @@ class TestJudgeBlanks(unittest.TestCase):
     def test_all_correct_returns_no_breakpoint(self):
         results = judge_blanks(self.SIMPLE, self._steps())
         self.assertIsNone(first_wrong_blank(results))
+
+    def test_unfilled_blank_is_not_marked_as_wrong_breakpoint(self):
+        answers = ["", "", "", "", "", ""]
+        results = judge_blanks(self.SIMPLE, self._steps(answers))
+        self.assertTrue(all(result["unfilled"] for result in results))
+        self.assertIsNone(first_wrong_blank(results))
+
+    def test_partial_submission_builds_unfilled_steps_and_blocks_guessing(self):
+        question = {
+            "id": "q-partial",
+            "kp_id": "1",
+            "stem": "解方程 x² - 6x + 8 = 0",
+            "answer": "x₁=4, x₂=2",
+            "params": {"a": 1, "b": -6, "c": 8, "design_id": "direct"},
+        }
+        expected_template = build_template(question["params"])
+        template, steps = _build_student_steps(
+            question,
+            {
+                "b1": str(expected_template["blanks"][0]["answer_index"] + 1),
+                "b2": "-8",
+                "b5": "2",
+            },
+        )
+        self.assertTrue(any(step.get("unfilled") for step in steps))
+        self.assertEqual(steps[-1]["result"], "x=2")
+        result = compute_program_grade(question, steps, template)
+        self.assertTrue(result["submission_incomplete"])
+        self.assertTrue(result["attribution_blocked_by_unfilled"])
+        self.assertNotIn("program_breakpoint", result)
+        self.assertFalse(result["final_answer_correct"])
 
 
 class TestGradeNodeTemplateMerge(unittest.TestCase):
